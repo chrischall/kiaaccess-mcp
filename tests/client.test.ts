@@ -453,7 +453,7 @@ describe('commands', () => {
     expect(calls[1].url).toBe('https://api.owners.kia.com/apigw/v1/rems/stop');
   });
 
-  it('flags the EV charge commands as unverified', async () => {
+  it('flags the EV charge commands as verified', async () => {
     const { fetchImpl, calls } = stubFetch([
       AUTH_OK,
       { body: { status: OK } },
@@ -462,9 +462,9 @@ describe('commands', () => {
     ]);
     const client = makeClient(fetchImpl);
 
-    expect((await client.startCharge(VIN_KEY, 80)).verified).toBe(false);
-    expect((await client.cancelCharge(VIN_KEY)).verified).toBe(false);
-    expect((await client.setChargeTargets(VIN_KEY, [{ plugType: 1, targetSOClevel: 90 }])).verified).toBe(false);
+    expect((await client.startCharge(VIN_KEY, 80)).verified).toBe(true);
+    expect((await client.cancelCharge(VIN_KEY)).verified).toBe(true);
+    expect((await client.setChargeTargets(VIN_KEY, [{ plugType: 1, targetSOClevel: 90 }])).verified).toBe(true);
 
     expect(JSON.parse(calls[1].init.body!)).toEqual({ chargeRatio: 80 });
     expect(calls[2].init.method).toBe('GET');

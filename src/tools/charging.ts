@@ -4,16 +4,18 @@
  * Read `docs/KIA-API.md` before changing anything here. Two facts drive the
  * whole shape of this file:
  *
- *  1. **Only `evc/gts` was verified live.** `evc/charge`, `evc/cancel` and
- *     `evc/sts` were never exercised against a real vehicle — their request
- *     shapes are inferred from the app's endpoint list. Every tool that touches
- *     one says so in its description AND in its result, so a caller can never
- *     mistake "the API returned success" for "the car did the thing".
+ *  1. **All four were verified live** — `evc/gts` on 2026-07-27, and
+ *     `evc/charge` / `evc/cancel` / `evc/sts` on 2026-07-28 against a
+ *     plugged-in EV9, each proven by a re-read rather than by the success
+ *     status. That distinction still matters at runtime: Kia answers
+ *     `statusCode: 0` the moment it accepts a command, seconds before the car
+ *     acts — and on an UNPLUGGED car it answers success and nothing happens at
+ *     all. So every result here separates "accepted" from "confirmed".
  *  2. **`cmm/gts` is not a per-action poll.** It returns global flags that never
- *     change per command, so nothing here waits on it. The only proof a command
- *     landed is re-reading state — which for charging means `evc/gts`, and that
- *     endpoint reports only the target state of charge. So the charge-limit tool
- *     can verify itself, and start/stop charge structurally cannot.
+ *     change per command, so nothing here waits on it. Proof comes from
+ *     re-reading state: `evc/gts` for the charge-limit tool (which checks
+ *     itself), and `evStatus.batteryCharge` — inside the `cmm/gvi` read that
+ *     `kia_vehicle_status` performs — for start/stop charge.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -70,10 +72,16 @@ const schemaChargeTarget = z.object({
 // Shared rendering
 // ---------------------------------------------------------------------------
 
-/** The standing warning attached to every unverified endpoint's result. */
-const UNVERIFIED_HINT =
-  'This endpoint has never been exercised against a real vehicle, so a success status proves only that ' +
-  'Kia accepted the request — not that the car acted on it. Check the car or the Kia app.';
+/**
+ * Standing note on every charge command's result. The endpoints ARE verified
+ * (2026-07-27, against a plugged-in EV9), but a success status still only means
+ * Kia accepted the request — the car acts on it seconds later. The proof is a
+ * re-read of `evStatus.batteryCharge` via `kia_vehicle_status`, or of
+ * `evc/gts` for a limit change.
+ */
+const ACCEPTED_HINT =
+  'A success status means Kia accepted the command, not that the car has acted on it yet. Confirm with ' +
+  'kia_vehicle_status (evStatus.batteryCharge flips within ~30-60s) or, for limits, kia_charge_targets.';
 
 /**
  * Confirm-gate for a mutating tool. Without `confirm: true` NO network call is
@@ -120,10 +128,17 @@ function describeCommand(result: KiaCommandResult): Record<string, unknown> {
   };
 }
 
-/** Why start/stop charge cannot be proven by this server. */
-const NO_VERIFICATION_POSSIBLE =
-  'Not attempted: the only EV read endpoint here is evc/gts, which reports the target state of charge — ' +
-  'not whether the car is charging. Nothing in this server can confirm this command took effect.';
+/**
+ * How a caller confirms start/stop charge. This server does not block on the
+ * re-read (the car takes ~30-60s to act, which is far too long to hold a tool
+ * call open), so it hands back the field to watch instead of pretending the
+ * command is unconfirmable — it is not; `evc/gts` simply is not where the
+ * answer lives.
+ */
+const CONFIRM_VIA_STATUS =
+  'Not attempted inline — the car takes ~30-60s to act. Confirm by calling kia_vehicle_status and reading ' +
+  'evStatus.batteryCharge (true while charging). evc/gts reports the TARGET state of charge, not whether ' +
+  'the car is charging, which is why the charge tools do not use it as proof.';
 
 // ---------------------------------------------------------------------------
 // Registrar
@@ -162,13 +177,12 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
     {
       description:
         `Ask the vehicle to start charging (\`${COMMAND_SPECS.charge.path}\`). ` +
-        'UNVERIFIED ENDPOINT: this was never exercised against a real vehicle (see docs/KIA-API.md) — the request ' +
-        'shape is inferred from the Kia app, and the command may do nothing. Worse, it cannot be checked: the only ' +
-        'EV read endpoint available (evc/gts) reports the target state of charge, not whether the car is charging, ' +
-        'so this server cannot confirm the outcome either way. ' +
+        'Verified against a plugged-in vehicle: evStatus.batteryCharge goes true within ~30-60s. Requires the car ' +
+        'to be plugged in — on an unplugged car Kia still accepts the request and nothing happens. Confirm with ' +
+        'kia_vehicle_status rather than trusting the success status. ' +
         'Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.',
       annotations: toolAnnotations({
-        title: 'Start Kia EV charging (unverified)',
+        title: 'Start Kia EV charging',
         readOnly: false,
         idempotent: true,
         openWorld: true,
@@ -191,7 +205,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         vinKey,
         action: `Start charging vehicle ${vinKey} to ${ratio}%`,
         body: { chargeRatio: ratio },
-        verification: NO_VERIFICATION_POSSIBLE,
+        verification: CONFIRM_VIA_STATUS,
       });
       if (gate) return gate;
 
@@ -199,8 +213,8 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       return jsonResult({
         ...describeCommand(result),
         chargeRatio: ratio,
-        verification: { attempted: false, reason: NO_VERIFICATION_POSSIBLE },
-        hint: UNVERIFIED_HINT,
+        verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
+        hint: ACCEPTED_HINT,
       });
     },
   );
@@ -210,12 +224,11 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
     {
       description:
         `Ask the vehicle to stop charging (\`${COMMAND_SPECS.cancelCharge.path}\`). ` +
-        'UNVERIFIED ENDPOINT: this was never exercised against a real vehicle (see docs/KIA-API.md) — it may do ' +
-        'nothing, and this server cannot confirm the outcome (evc/gts reports target state of charge, not charging ' +
-        'state). Do not rely on it to stop a charge that matters. ' +
+        'Verified against a charging vehicle: evStatus.batteryCharge goes false within ~30-60s. Confirm with ' +
+        'kia_vehicle_status rather than trusting the success status. ' +
         'Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.',
       annotations: toolAnnotations({
-        title: 'Stop Kia EV charging (unverified)',
+        title: 'Stop Kia EV charging',
         readOnly: false,
         idempotent: true,
         openWorld: true,
@@ -226,15 +239,15 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       const gate = previewUnlessConfirmed(confirm, 'cancelCharge', {
         vinKey,
         action: `Stop charging vehicle ${vinKey}`,
-        verification: NO_VERIFICATION_POSSIBLE,
+        verification: CONFIRM_VIA_STATUS,
       });
       if (gate) return gate;
 
       const result = await client.cancelCharge(vinKey);
       return jsonResult({
         ...describeCommand(result),
-        verification: { attempted: false, reason: NO_VERIFICATION_POSSIBLE },
-        hint: UNVERIFIED_HINT,
+        verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
+        hint: ACCEPTED_HINT,
       });
     },
   );
@@ -244,14 +257,13 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
     {
       description:
         `Set the target state of charge per plug type (\`${COMMAND_SPECS.setChargeTargets.path}\`). ` +
-        'UNVERIFIED ENDPOINT: this was never exercised against a real vehicle (see docs/KIA-API.md) — the request ' +
-        'shape is inferred from the Kia app. Unlike the other charge commands this one CAN be checked, and is: ' +
-        'after the write the targets are re-read from evc/gts and compared, and the result reports whether the ' +
-        'change actually landed. ' +
+        'Verified against a real vehicle. The write is checked: afterwards the targets are re-read from evc/gts ' +
+        'and compared, and the result reports whether the change actually landed. Send BOTH plug types — the list ' +
+        'replaces the stored one, so omitting an entry drops that target. ' +
         'Without confirm:true it makes NO network call (not even the baseline read) and returns a dry-run preview ' +
         'of exactly what would be sent.',
       annotations: toolAnnotations({
-        title: 'Set Kia EV charge limits (unverified)',
+        title: 'Set Kia EV charge limits',
         readOnly: false,
         idempotent: true,
         openWorld: true,
@@ -292,7 +304,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
           ...describeCommand(unchecked),
           requested: targets,
           verification: { attempted: false, reason: 'Caller passed verify:false, so evc/gts was not re-read.' },
-          hint: UNVERIFIED_HINT,
+          hint: ACCEPTED_HINT,
         });
       }
 
@@ -320,7 +332,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
           targets: check.snapshot,
           hint: check.verified
             ? 'Confirmed by re-reading evc/gts — the requested targets are what the car reports.'
-            : `Kia accepted the request but evc/gts still does not report the requested targets. ${UNVERIFIED_HINT}`,
+            : `Kia accepted the request but evc/gts still does not report the requested targets. ${ACCEPTED_HINT}`,
         },
       });
     },

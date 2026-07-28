@@ -9,6 +9,7 @@ import type {
   VerifyCommandResult,
 } from '../src/client.js';
 import { diffIgnoringSyncDate } from '../src/client.js';
+import { COMMAND_SPECS } from '../src/protocol.js';
 import { registerChargingTools } from '../src/tools/charging.js';
 
 /**
@@ -33,10 +34,15 @@ const VIN_KEY = 'FAKE-VEHICLE-KEY';
 const OK_STATUS = { statusCode: 0, errorType: 0, errorCode: 0, errorMessage: 'Success with response body' };
 
 function commandResult(overrides: Partial<KiaCommandResult> & Pick<KiaCommandResult, 'command'>): KiaCommandResult {
+  // `verified` is DERIVED from the real spec rather than hardcoded here. A
+  // fixture default would silently disagree with src/protocol.ts the next time
+  // an endpoint's status changes — which is exactly how this file came to
+  // assert `endpointVerified: false` for endpoints that had been verified.
+  const spec = COMMAND_SPECS[overrides.command as keyof typeof COMMAND_SPECS];
   return {
     path: 'evc/unspecified',
     method: 'POST',
-    verified: false,
+    verified: spec?.verified ?? false,
     xid: 'FAKE-XID',
     raw: { status: OK_STATUS },
     ...overrides,
@@ -166,7 +172,7 @@ describe('registerChargingTools — registration', () => {
     expect(commandsMock.getKiaWriteMode).toHaveBeenCalled();
   });
 
-  it('states plainly in every write tool description that the endpoint is unverified', async () => {
+  it('tells the caller how to confirm each write, since a success status is not proof', async () => {
     harness = await harnessFor(makeClient());
     const { tools } = await harness.client.listTools();
     const byName = new Map(tools.map((t) => [t.name, t.description ?? '']));
@@ -177,7 +183,12 @@ describe('registerChargingTools — registration', () => {
       ['kia_set_charge_limits', 'evc/sts'],
     ] as const) {
       const description = byName.get(name) as string;
-      expect(description).toMatch(/UNVERIFIED/);
+      // These endpoints are verified against a real vehicle, so the description
+      // must NOT claim otherwise — but a success status still only means Kia
+      // accepted the command, so each one has to name its confirmation path.
+      expect(description).not.toMatch(/UNVERIFIED/i);
+      expect(description).toMatch(/Verified against a|Verified against a real vehicle/);
+      expect(description).toMatch(/kia_vehicle_status|evc\/gts|re-read/);
       expect(description).toContain(endpoint);
       expect(description).toMatch(/confirm/);
     }
@@ -230,7 +241,8 @@ describe('kia_start_charge', () => {
     expect(parsed.method).toBe('POST');
     expect(parsed.endpoint).toBe('evc/charge');
     expect(parsed.willSend).toEqual({ chargeRatio: 100 });
-    expect(parsed.endpointVerified).toBe(false);
+    // Verified against a live vehicle, so the preview must not claim otherwise.
+    expect(parsed.endpointVerified).toBe(true);
   });
 
   it('previews the caller-supplied chargeRatio', async () => {
@@ -245,7 +257,7 @@ describe('kia_start_charge', () => {
     expect(networkCallCount(stub)).toBe(0);
   });
 
-  it('issues the command with confirm:true and reports it as unverified', async () => {
+  it('issues the command with confirm:true and reports it as verified', async () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
@@ -258,7 +270,7 @@ describe('kia_start_charge', () => {
 
     expect(stub.startCharge).toHaveBeenCalledExactlyOnceWith(VIN_KEY, 80);
     expect(parsed.command).toBe('charge');
-    expect(parsed.endpointVerified).toBe(false);
+    expect(parsed.endpointVerified).toBe(true);
     expect(parsed.xid).toBe('FAKE-XID');
     expect(parsed.verification.attempted).toBe(false);
     expect(parsed.verification.reason).toMatch(/evc\/gts/);
@@ -311,7 +323,7 @@ describe('kia_stop_charge', () => {
 
     expect(stub.cancelCharge).toHaveBeenCalledExactlyOnceWith(VIN_KEY);
     expect(parsed.command).toBe('cancelCharge');
-    expect(parsed.endpointVerified).toBe(false);
+    expect(parsed.endpointVerified).toBe(true);
   });
 });
 
@@ -361,7 +373,7 @@ describe('kia_set_charge_limits', () => {
 
     expect(parsed.verification.verified).toBe(false);
     expect(parsed.verification.hint).toMatch(/does not report the requested targets/);
-    expect(parsed.verification.hint).toMatch(/never been exercised against a real vehicle/);
+    expect(parsed.verification.hint).toMatch(/accepted the command|accepted the request/);
   });
 
   it('skips the baseline read and the re-read when verify:false', async () => {

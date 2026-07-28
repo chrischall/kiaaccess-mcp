@@ -184,9 +184,20 @@ describe('COMMAND_SPECS', () => {
     expect(COMMAND_SPECS.start.proofFields).toContain('ign3');
   });
 
-  it('marks the EV charge commands unverified', () => {
-    expect(COMMAND_SPECS.charge.verified).toBe(false);
-    expect(COMMAND_SPECS.cancelCharge.verified).toBe(false);
-    expect(COMMAND_SPECS.setChargeTargets.verified).toBe(false);
+  it('marks every command verified, each with the proof field it was verified by', () => {
+    // All seven were exercised against the live vehicle. The flag is not
+    // decorative: it feeds endpointVerified in every tool result, so a spec
+    // added later from documentation alone must set it false rather than
+    // inherit a blanket true.
+    for (const spec of Object.values(COMMAND_SPECS)) {
+      expect(spec.verified).toBe(true);
+    }
+    // Charging proves itself with evStatus.batteryCharge, NOT evc/gts — that
+    // reports the target state of charge, not whether the car is charging.
+    expect(COMMAND_SPECS.charge.proofFields).toEqual(['evStatus.batteryCharge']);
+    expect(COMMAND_SPECS.cancelCharge.proofFields).toEqual(['evStatus.batteryCharge']);
+    // evc/sts is proven by re-reading evc/gts, which the tool does itself.
+    expect(COMMAND_SPECS.setChargeTargets.proofFields).toEqual([]);
+    expect(COMMAND_SPECS.setChargeTargets.note).toMatch(/BOTH plug types/);
   });
 });

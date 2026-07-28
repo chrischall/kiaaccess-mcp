@@ -1,8 +1,9 @@
 /**
  * Wire-level constants and helpers for the Kia Owners API
  * (`api.owners.kia.com/apigw/v1/`) — the undocumented API behind the Kia Access
- * iOS app. Every shape here was verified live against a 2024 EV9 on 2026-07-27;
- * see `docs/KIA-API.md`, which is the ground truth for this file.
+ * iOS app. Every shape here was verified live against a 2024 EV9 — reads, auth
+ * and the door/climate commands on 2026-07-27, the EV charge commands on
+ * 2026-07-28; see `docs/KIA-API.md`, which is the ground truth for this file.
  *
  * Kept as a leaf module (no imports from `client.ts` / `auth.ts`) so both the
  * authentication bootstrap and the authenticated client can share it without an
@@ -95,9 +96,12 @@ export interface CommandSpec {
   path: string;
   method: 'GET' | 'POST';
   /**
-   * `true` only for commands exercised against the live vehicle on 2026-07-27
-   * and confirmed by re-reading `cmm/gvi`. Unverified commands must say so in
-   * their tool descriptions.
+   * `true` only for commands exercised against the live vehicle and confirmed
+   * by re-reading their {@link CommandSpec.proofFields}. Unverified commands
+   * must say so in their tool descriptions. Every command here is now verified
+   * (doors + climate 2026-07-27, charging 2026-07-28 against a plugged-in car),
+   * but the flag stays: a future endpoint added from documentation rather than
+   * from a live run must be able to declare itself unproven.
    */
   verified: boolean;
   /**
@@ -147,23 +151,27 @@ export const COMMAND_SPECS = {
   charge: {
     path: 'evc/charge',
     method: 'POST',
-    verified: false,
-    proofFields: [],
-    note: 'UNVERIFIED — never exercised against a live vehicle.',
+    verified: true,
+    // Charging state is NOT in evc/gts (that reports the target state of
+    // charge). It is `evStatus.batteryCharge` inside the same cmm/gvi read
+    // every other command proves itself with.
+    proofFields: ['evStatus.batteryCharge'],
+    note: 'Requires the car to be plugged in — unplugged, Kia returns success and nothing happens.',
   },
   cancelCharge: {
     path: 'evc/cancel',
     method: 'GET',
-    verified: false,
-    proofFields: [],
-    note: 'UNVERIFIED — never exercised against a live vehicle.',
+    verified: true,
+    proofFields: ['evStatus.batteryCharge'],
   },
   setChargeTargets: {
     path: 'evc/sts',
     method: 'POST',
-    verified: false,
+    verified: true,
+    // Proven by re-reading evc/gts rather than cmm/gvi — the targets live
+    // there, so this one spec's proof is checked by the tool itself.
     proofFields: [],
-    note: 'UNVERIFIED — never exercised against a live vehicle.',
+    note: 'Replaces the whole target list — send an entry for BOTH plug types or the omitted one is dropped.',
   },
 } as const satisfies Record<string, CommandSpec>;
 

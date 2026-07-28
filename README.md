@@ -140,13 +140,13 @@ Two more rules hold for every command:
 |---|---|---|
 | `kia_start_climate` | `comfort` | Preconditioning. Temperature is best-effort: the car may report its own last-set target instead of the one requested. |
 | `kia_stop_climate` | `comfort` | Verified by re-reading `climate.airCtrl`. |
-| `kia_start_charge` | `comfort` | **Unverified endpoint** — never exercised against a real vehicle, and the outcome cannot be checked. |
-| `kia_stop_charge` | `comfort` | **Unverified endpoint.** Do not rely on it to stop a charge that matters. |
-| `kia_set_charge_limits` | `comfort` | **Unverified endpoint**, but this one is re-read and verified afterwards. |
+| `kia_start_charge` | `comfort` | Verified. Needs the car plugged in — unplugged, Kia accepts the request and nothing happens. Confirm via `evStatus.batteryCharge`. |
+| `kia_stop_charge` | `comfort` | Verified. Confirm via `evStatus.batteryCharge`. |
+| `kia_set_charge_limits` | `comfort` | Verified, and re-read against `evc/gts` afterwards. Send both plug types — the list replaces the stored one. |
 | `kia_lock_doors` | `all` | Verified by re-reading `doorLock`. |
 | `kia_unlock_doors` | `all` | Leaves the car physically unsecured. Only run it when the user explicitly asked. |
 
-The four door/climate endpoints and both reads were verified live against a 2024 EV9 on 2026-07-27; the three `evc/*` command endpoints were not, and every tool that touches one says so in its description *and* in its result. The full protocol write-up is in [`docs/KIA-API.md`](docs/KIA-API.md).
+Every endpoint here was verified live against a 2024 EV9 — the reads and the four door/climate commands on 2026-07-27, and the three `evc/*` charging commands on 2026-07-28 against a plugged-in car. Each was proven by re-reading state, never by the success status: Kia answers `statusCode: 0` the moment it accepts a command, seconds before the car acts, and on an unplugged car it answers success and does nothing at all. Every command result therefore reports "accepted" and "confirmed" separately. The full protocol write-up is in [`docs/KIA-API.md`](docs/KIA-API.md).
 
 ## Hosted connector
 

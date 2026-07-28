@@ -189,9 +189,9 @@ response header** of the command call.
 
 ## Command endpoints
 
-All four door + climate commands were exercised against the live vehicle and
-confirmed by re-reading `cmm/gvi` (verified 2026-07-27). The EV charge commands
-remain unverified.
+Every command below was exercised against the live vehicle and confirmed by a
+re-read — doors and climate on 2026-07-27, the EV charge commands on
+2026-07-28 against a plugged-in car.
 
 Every command takes `sid` + `vinkey` headers, returns
 `{"status":{"statusCode":0,...,"errorMessage":"Success with response body"}}`,
@@ -254,10 +254,29 @@ The `climate`/`heatVentSeat` fields only appear when `cmm/gvi` is called with
 `vehicleConfigReq.airTempRange: "1"` and `seatHeatCoolOption: "1"`; with those
 at `"0"` the whole `climate` object is absent.
 
-### Unverified
+### Charging — VERIFIED (2026-07-28, against a plugged-in EV9)
 
-| Endpoint | Method | Body |
-| --- | --- | --- |
-| `evc/charge` | POST | `{ "chargeRatio": 100 }` |
-| `evc/cancel` | GET | — |
-| `evc/sts` | POST | `{ "targetSOClist": [{ "plugType": 0\|1, "targetSOClevel": <int> }] }` |
+| Endpoint | Method | Body | Proven by | Observed |
+| --- | --- | --- | --- | --- |
+| `evc/cancel` | GET | — | `evStatus.batteryCharge` | `true` → `false` |
+| `evc/charge` | POST | `{ "chargeRatio": 100 }` | `evStatus.batteryCharge` | `false` → `true` |
+| `evc/sts` | POST | `{ "targetSOClist": [{ "plugType": 0\|1, "targetSOClevel": <int> }] }` | re-read of `evc/gts` | `90` → `80` |
+
+Charging state lives under `vehicleStatusRpt.vehicleStatus.evStatus`:
+
+```json
+{ "batteryCharge": true,      // charging right now
+  "batteryStatus": 82,        // state of charge, %
+  "batteryPlugin": 4,         // plugged in
+  "remainChargeTime": { "value": 80, "unit": 4 } }
+```
+
+`evStatus` also carries `pluggedInState`, `chargingCurrent`, `chargingDoorState`,
+`targetSOC`, `v2lStatus`, `dischargeRemainTime` and `batteryConditioning`.
+
+Two notes from running these for real:
+
+- **`evc/sts` replaces the whole list.** Send an entry for *both* plug types;
+  omitting one drops that target rather than leaving it untouched.
+- **`evc/charge` needs the car plugged in.** Unplugged, Kia still returns
+  `statusCode: 0` and nothing happens — another reason the re-read is the proof.

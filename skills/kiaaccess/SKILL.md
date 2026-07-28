@@ -69,7 +69,7 @@ The remember-me token is then stored locally and refreshes sessions silently for
 |------|------|-------|
 | `kia_start_climate(vinKey, temperature?, durationMinutes?, defrost?, waitSeconds?, confirm)` | `comfort` | Verified live. Temperature is best-effort — do not promise the user an exact cabin temperature. |
 | `kia_stop_climate(vinKey, waitSeconds?, confirm)` | `comfort` | Verified live. |
-| `kia_start_charge` / `kia_stop_charge` / `kia_set_charge_limits` | `comfort` | **Unverified endpoints** — never exercised against a real car. Say so when reporting the result. Only `kia_set_charge_limits` can be checked afterwards. |
+| `kia_start_charge` / `kia_stop_charge` / `kia_set_charge_limits` | `comfort` | Verified against a plugged-in car. A success status means Kia accepted the command, not that the car acted — confirm charge start/stop via `kia_vehicle_status` (`evStatus.batteryCharge`), and limits via `kia_charge_targets`. `kia_set_charge_limits` REPLACES the target list, so send both plug types. Starting a charge on an unplugged car succeeds and does nothing. |
 | `kia_lock_doors(vinKey, waitSeconds?, confirm)` | `all` | Verified live by re-reading `doorLock`. |
 | `kia_unlock_doors(vinKey, waitSeconds?, confirm)` | `all` | Leaves the car unsecured. Only when the user explicitly asked for this vehicle. |
 
