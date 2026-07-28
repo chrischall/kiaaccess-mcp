@@ -329,6 +329,30 @@ describe('kiaAuth.login — step 2 (code supplied)', () => {
     await expect(kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv))).rejects.toThrow(/connection reset/);
   });
 
+  it('keeps the code box revealed on EVERY step-2 failure', async () => {
+    // A revealOnDemand field is re-hidden on a server-side re-render unless the
+    // rejection names it, so a wrong or expired code hid the very box the error
+    // text tells the user to correct ("Clear the code box and submit again").
+    // Invisible with JS on — the inline script only ever un-hides, never
+    // re-hides — which is why it survived until a sibling connector hit it.
+    //
+    // Asserts the contract that matters: revealFields present AND a non-empty
+    // message, since an empty message renders as a silent prompt rather than
+    // the failure it is.
+    const expiredStash = (await kiaAuth
+      .login({ ...CREDS, otp: '038291' }, envWith(stubKv()))
+      .catch((e: Error) => e)) as Error & { revealFields?: string[] };
+    expect(expiredStash.revealFields).toEqual(['otp']);
+    expect(expiredStash.message).not.toBe('');
+
+    stubGlobalFetch([{ body: { status: FAIL } }]);
+    const wrongCode = (await kiaAuth
+      .login({ ...CREDS, otp: '000000' }, envWith(primed()))
+      .catch((e: Error) => e)) as Error & { revealFields?: string[] };
+    expect(wrongCode.revealFields).toEqual(['otp']);
+    expect(wrongCode.message).not.toBe('');
+  });
+
   it('reports a wrong code without retrying it', async () => {
     // A retry burns Kia's loginAttempt budget toward enforceRecaptcha, which
     // breaks server-side auth for the account permanently.
@@ -336,6 +360,43 @@ describe('kiaAuth.login — step 2 (code supplied)', () => {
     const { calls } = stubGlobalFetch([{ body: { status: FAIL } }]);
     await expect(kiaAuth.login({ ...CREDS, otp: '000000' }, envWith(kv))).rejects.toThrow();
     expect(calls).toHaveLength(1);
+  });
+
+  it('normalises a non-Error rejection from the KV binding, still revealing the box', async () => {
+    // kv.get is an external binding: workerd can reject it with something that
+    // is not an Error, and `.revealFields` cannot be attached to a string. The
+    // normalisation exists for that, and without it the throw would escape
+    // un-annotated and the code box would vanish on retry.
+    const kv = stubKv();
+    kv.binding.get = async () => { throw 'KV unavailable'; };
+    const { calls } = stubGlobalFetch([]);
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      revealFields?: string[];
+    };
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain('KV unavailable');
+    expect(err.revealFields).toEqual(['otp']);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not clobber a rejection that already chose its own reveal set', async () => {
+    // The guard exists so a future throw site inside this block can name its own
+    // fields. Asserted rather than assumed: silently overwriting them would be a
+    // subtle bug in whatever adds that path later.
+    const kv = stubKv();
+    kv.binding.get = async () => {
+      const e = new Error('needs a different field');
+      Object.assign(e, { revealFields: ['somethingElse'] });
+      throw e;
+    };
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      revealFields?: string[];
+    };
+
+    expect(err.revealFields).toEqual(['somethingElse']);
   });
 
   it('rejects the login when the post-verification read fails', async () => {
@@ -348,7 +409,13 @@ describe('kiaAuth.login — step 2 (code supplied)', () => {
       { headers: { sid: 's' }, body: { status: OK } },
       { body: { status: FAIL } },
     ]);
-    await expect(kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv))).rejects.toThrow();
+    // This is one of the three step-2 failure modes the reveal fix covers, so
+    // assert the contract here too rather than merely that it rejects.
+    const err = await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      revealFields?: string[];
+    };
+    expect(err.revealFields).toEqual(['otp']);
+    expect(err.message).not.toBe('');
   });
 
   it('trims whitespace a copy/paste drags into the email and code', async () => {
