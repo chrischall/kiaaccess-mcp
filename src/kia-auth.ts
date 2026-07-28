@@ -301,13 +301,17 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
       // it — where it stays visible while the code is being typed, rather than
       // only in a banner that reads as transient.
       const destination = sent.maskedPhone ?? started.maskedPhone ?? 'your phone';
-      const challenge = new Error(
-        `Kia texted a verification code to ${destination}. Enter it below and submit again — the code expires in ` +
-          'about two minutes.',
-      );
+      // Deliberately EMPTY. This rejection is a prompt, not a failure: nothing
+      // went wrong, so a red banner at the top of the page would report a
+      // problem that did not occur — and it would duplicate the hint below,
+      // which is the better home for it because it stays beside the box while
+      // the code is typed. Needs @chrischall/mcp-connector >= 1.3.0, where an
+      // empty message on a revealing rejection renders no banner instead of
+      // substituting a generic "Sign-in failed".
+      const challenge = new Error('');
       Object.assign(challenge, {
         revealFields: ['otp'],
-        fieldHints: { otp: `Sent to ${destination}` },
+        fieldHints: { otp: `Code texted to ${destination} — expires in about two minutes` },
       });
       throw challenge;
     }
