@@ -1,8 +1,9 @@
 /**
  * Wire-level constants and helpers for the Kia Owners API
  * (`api.owners.kia.com/apigw/v1/`) — the undocumented API behind the Kia Access
- * iOS app. Every shape here was verified live against a 2024 EV9 on 2026-07-27;
- * see `docs/KIA-API.md`, which is the ground truth for this file.
+ * iOS app. Every shape here was verified live against a 2024 EV9 — reads, auth
+ * and the door/climate commands on 2026-07-27, the EV charge commands on
+ * 2026-07-28; see `docs/KIA-API.md`, which is the ground truth for this file.
  *
  * Kept as a leaf module (no imports from `client.ts` / `auth.ts`) so both the
  * authentication bootstrap and the authenticated client can share it without an

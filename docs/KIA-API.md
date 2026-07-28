@@ -190,7 +190,8 @@ response header** of the command call.
 ## Command endpoints
 
 Every command below was exercised against the live vehicle and confirmed by a
-re-read (verified 2026-07-27) — doors, climate, and the EV charge commands.
+re-read — doors and climate on 2026-07-27, the EV charge commands on
+2026-07-28 against a plugged-in car.
 
 Every command takes `sid` + `vinkey` headers, returns
 `{"status":{"statusCode":0,...,"errorMessage":"Success with response body"}}`,
@@ -253,7 +254,7 @@ The `climate`/`heatVentSeat` fields only appear when `cmm/gvi` is called with
 `vehicleConfigReq.airTempRange: "1"` and `seatHeatCoolOption: "1"`; with those
 at `"0"` the whole `climate` object is absent.
 
-### Charging — VERIFIED (2026-07-27, against a plugged-in EV9)
+### Charging — VERIFIED (2026-07-28, against a plugged-in EV9)
 
 | Endpoint | Method | Body | Proven by | Observed |
 | --- | --- | --- | --- | --- |
