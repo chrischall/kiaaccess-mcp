@@ -4,16 +4,18 @@
  * Read `docs/KIA-API.md` before changing anything here. Two facts drive the
  * whole shape of this file:
  *
- *  1. **Only `evc/gts` was verified live.** `evc/charge`, `evc/cancel` and
- *     `evc/sts` were never exercised against a real vehicle — their request
- *     shapes are inferred from the app's endpoint list. Every tool that touches
- *     one says so in its description AND in its result, so a caller can never
- *     mistake "the API returned success" for "the car did the thing".
+ *  1. **All four were verified live** — `evc/gts` on 2026-07-27, and
+ *     `evc/charge` / `evc/cancel` / `evc/sts` on 2026-07-28 against a
+ *     plugged-in EV9, each proven by a re-read rather than by the success
+ *     status. That distinction still matters at runtime: Kia answers
+ *     `statusCode: 0` the moment it accepts a command, seconds before the car
+ *     acts — and on an UNPLUGGED car it answers success and nothing happens at
+ *     all. So every result here separates "accepted" from "confirmed".
  *  2. **`cmm/gts` is not a per-action poll.** It returns global flags that never
- *     change per command, so nothing here waits on it. The only proof a command
- *     landed is re-reading state — which for charging means `evc/gts`, and that
- *     endpoint reports only the target state of charge. So the charge-limit tool
- *     can verify itself, and start/stop charge structurally cannot.
+ *     change per command, so nothing here waits on it. Proof comes from
+ *     re-reading state: `evc/gts` for the charge-limit tool (which checks
+ *     itself), and `evStatus.batteryCharge` — inside the `cmm/gvi` read that
+ *     `kia_vehicle_status` performs — for start/stop charge.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -126,10 +128,17 @@ function describeCommand(result: KiaCommandResult): Record<string, unknown> {
   };
 }
 
-/** Why start/stop charge cannot be proven by this server. */
-const NO_VERIFICATION_POSSIBLE =
-  'Not attempted: the only EV read endpoint here is evc/gts, which reports the target state of charge — ' +
-  'not whether the car is charging. Nothing in this server can confirm this command took effect.';
+/**
+ * How a caller confirms start/stop charge. This server does not block on the
+ * re-read (the car takes ~30-60s to act, which is far too long to hold a tool
+ * call open), so it hands back the field to watch instead of pretending the
+ * command is unconfirmable — it is not; `evc/gts` simply is not where the
+ * answer lives.
+ */
+const CONFIRM_VIA_STATUS =
+  'Not attempted inline — the car takes ~30-60s to act. Confirm by calling kia_vehicle_status and reading ' +
+  'evStatus.batteryCharge (true while charging). evc/gts reports the TARGET state of charge, not whether ' +
+  'the car is charging, which is why the charge tools do not use it as proof.';
 
 // ---------------------------------------------------------------------------
 // Registrar
@@ -196,7 +205,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         vinKey,
         action: `Start charging vehicle ${vinKey} to ${ratio}%`,
         body: { chargeRatio: ratio },
-        verification: NO_VERIFICATION_POSSIBLE,
+        verification: CONFIRM_VIA_STATUS,
       });
       if (gate) return gate;
 
@@ -204,7 +213,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       return jsonResult({
         ...describeCommand(result),
         chargeRatio: ratio,
-        verification: { attempted: false, reason: NO_VERIFICATION_POSSIBLE },
+        verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
         hint: ACCEPTED_HINT,
       });
     },
@@ -230,14 +239,14 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       const gate = previewUnlessConfirmed(confirm, 'cancelCharge', {
         vinKey,
         action: `Stop charging vehicle ${vinKey}`,
-        verification: NO_VERIFICATION_POSSIBLE,
+        verification: CONFIRM_VIA_STATUS,
       });
       if (gate) return gate;
 
       const result = await client.cancelCharge(vinKey);
       return jsonResult({
         ...describeCommand(result),
-        verification: { attempted: false, reason: NO_VERIFICATION_POSSIBLE },
+        verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
         hint: ACCEPTED_HINT,
       });
     },

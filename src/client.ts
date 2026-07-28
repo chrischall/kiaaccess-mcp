@@ -599,19 +599,33 @@ export class KiaClient {
     return this.command('stop', { vinKey });
   }
 
-  // -- commands (UNVERIFIED — never exercised against a live vehicle) --------
+  // -- EV charge commands (verified 2026-07-28 against a plugged-in vehicle) --
 
-  /** **UNVERIFIED.** Start charging to `chargeRatio` percent. */
+  /**
+   * Start charging to `chargeRatio` percent.
+   *
+   * Requires the car to be plugged in: unplugged, Kia still answers
+   * `statusCode: 0` and nothing happens. Confirm via `evStatus.batteryCharge`
+   * in a subsequent `getVehicleStatus` — not via `evc/gts`, which reports the
+   * TARGET state of charge rather than whether the car is charging.
+   */
   startCharge(vinKey: string, chargeRatio = 100): Promise<KiaCommandResult> {
     return this.command('charge', { vinKey, body: { chargeRatio } });
   }
 
-  /** **UNVERIFIED.** Cancel charging. */
+  /**
+   * Cancel charging. Confirm via `evStatus.batteryCharge` going false.
+   */
   cancelCharge(vinKey: string): Promise<KiaCommandResult> {
     return this.command('cancelCharge', { vinKey });
   }
 
-  /** **UNVERIFIED.** Set the per-plug-type target state of charge. */
+  /**
+   * Set the per-plug-type target state of charge.
+   *
+   * REPLACES the stored list — pass an entry for every plug type you want to
+   * keep, or the omitted one is dropped. Verifiable by re-reading `evc/gts`.
+   */
   setChargeTargets(vinKey: string, targetSOClist: KiaChargeTarget[]): Promise<KiaCommandResult> {
     return this.command('setChargeTargets', { vinKey, body: { targetSOClist } });
   }
