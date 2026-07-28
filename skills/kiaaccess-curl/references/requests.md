@@ -1,7 +1,7 @@
 # Ready-to-run requests
 
-Every shape here was verified live on 2026-07-27 against a 2024 Kia EV9, except
-the `evc/*` commands, which are flagged UNVERIFIED.
+Every shape here was verified live on 2026-07-27 against a 2024 Kia EV9 —
+including the `evc/*` charging commands, run against the car while plugged in.
 
 ## Header helper
 
@@ -12,10 +12,27 @@ device id stable.
 KIA_BASE='https://api.owners.kia.com/apigw/v1'
 : "${KIA_DEVICE:?export KIA_DEVICE=\$(uuidgen) first}"
 
+# Session file for THIS skill. Deliberately NOT ~/.kiaaccess-mcp/session.json —
+# that path belongs to the MCP server, whose store is keyed by accountId with a
+# different schema (src/session.ts). Writing this skill's flat
+# {rmtoken, deviceId} there corrupts the server's session and forces it back
+# through MFA.
+KIA_SESSION="${KIA_CURL_SESSION:-$HOME/.kiaaccess-mcp/curl-session.json}"
+
+# Builds the header list into the KIA_HDRS array. Extra headers passed as args.
 kia_headers() {
-  # usage: kia_headers [extra-header ...]
-  local off; off=$(( $(date +%z | cut -c1-3) ))
-  printf '%s\n' \
+  local z sign off h
+  z=$(date +%z)                       # e.g. -0800, +0530
+  sign=${z:0:1}
+  # `10#` forces base 10. Without it, bash reads a leading-zero offset such as
+  # `08`/`09` as OCTAL and dies with "value too great for base" — so this breaks
+  # in US Pacific winter, Alaska, Japan, Korea and China. zsh does not have the
+  # problem, which is a good way to ship it broken without noticing.
+  off=$(( 10#${z:1:2} ))
+  [ "$sign" = "-" ] && off=$(( 0 - off ))
+
+  KIA_HDRS=()
+  for h in \
     "content-type: application/json;charset=utf-8" \
     "accept: application/json" \
     "accept-language: en-US,en;q=0.9" \
@@ -27,18 +44,27 @@ kia_headers() {
     "secretkey: sydnat-9kykci-Kuhtep-h5nK" "to: APIGW" "tokentype: A" \
     "date: $(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S GMT')" \
     "user-agent: KIAPrimo_iOS/37 CFNetwork/1335.0.3.4 Darwin/21.6.0" \
-    "$@" | sed 's/^/-H\n/'
+    "$@"
+  do
+    KIA_HDRS+=(-H "$h")
+  done
 }
 
-# curl wrapper: kia_curl <method> <path> [body] -- [extra headers...]
+# curl wrapper: kia_curl <method> <path> [body] [-- extra-header ...]
 kia_curl() {
-  local method="$1" path="$2" body="${3:-}"; shift 3 2>/dev/null || shift 2
+  local method="$1" path="$2" body="${3:-}"
+  shift 2; [ $# -gt 0 ] && shift          # drop the body arg when present
   [ "${1:-}" = "--" ] && shift
-  local args=(); while IFS= read -r line; do args+=("$line"); done < <(kia_headers "$@")
-  curl -sS -X "$method" "${KIA_BASE}/${path}" "${args[@]}" \
+  kia_headers "$@"
+  curl -sS -X "$method" "${KIA_BASE}/${path}" "${KIA_HDRS[@]}" \
     ${body:+--data "$body"} -D /tmp/kia_hdrs --compressed
 }
 ```
+
+Both functions work under bash and zsh. **Test under `bash` if you change them** —
+the octal trap above bites only bash, so zsh-only testing hides it. An array is
+used rather than piping headers through `sed`, which avoids depending on GNU
+sed's `\n`-in-replacement behaviour.
 
 `secretkey` is a **static app constant**, not a user secret — it is the same for
 every install.
@@ -73,17 +99,21 @@ kia_curl POST cmm/verifyOTP "$(jq -nc --arg o "$CODE" '{otp:$o}')" -- \
 SID=$(grep -i '^sid:'     /tmp/kia_hdrs | tr -d '\r' | cut -d' ' -f2)
 RMTOKEN=$(grep -i '^rmtoken:' /tmp/kia_hdrs | tr -d '\r' | cut -d' ' -f2)
 
-mkdir -p ~/.kiaaccess-mcp && chmod 700 ~/.kiaaccess-mcp
+mkdir -p "$(dirname "$KIA_SESSION")" && chmod 700 "$(dirname "$KIA_SESSION")"
 jq -nc --arg r "$RMTOKEN" --arg d "$KIA_DEVICE" '{rmtoken:$r,deviceId:$d}' \
-  > ~/.kiaaccess-mcp/session.json
-chmod 600 ~/.kiaaccess-mcp/session.json
+  > "$KIA_SESSION"
+chmod 600 "$KIA_SESSION"
 ```
+
+`$KIA_SESSION` — **not** `session.json`. That neighbouring file is the MCP
+server's own store (keyed by `accountId`, different schema); clobbering it sends
+the server back through MFA.
 
 ## 2. Refresh — no MFA, use this every other time
 
 ```bash
-RMTOKEN=$(jq -r .rmtoken ~/.kiaaccess-mcp/session.json)
-KIA_DEVICE=$(jq -r .deviceId ~/.kiaaccess-mcp/session.json)
+RMTOKEN=$(jq -r .rmtoken "$KIA_SESSION")
+KIA_DEVICE=$(jq -r .deviceId "$KIA_SESSION")
 
 kia_curl POST prof/authUser "$(jq -nc \
   --arg u "$KIA_USERNAME" --arg p "$KIA_PASSWORD" --arg d "$KIA_DEVICE" \
@@ -171,12 +201,20 @@ Omit `heatVentSeat` unless you know the car supports the seats you name — Kia
 validates seat capability per vehicle.
 
 ```bash
-# UNVERIFIED — shapes from the OSS client, never run against a real vehicle
+# Charging — VERIFIED against a plugged-in EV9.
+# Proof: vehicleStatus.evStatus.batteryCharge flips; evc/sts proven via evc/gts.
 kia_curl POST evc/charge '{"chargeRatio":100}' -- "sid: $SID" "vinkey: $VIN"
 kia_curl GET  evc/cancel ''                    -- "sid: $SID" "vinkey: $VIN"
-kia_curl POST evc/sts '{"targetSOClist":[{"plugType":0,"targetSOClevel":80},
-                                          {"plugType":1,"targetSOClevel":90}]}' \
+
+# Send BOTH plug types — evc/sts replaces the list, so omitting one drops it.
+kia_curl POST evc/sts '{"targetSOClist":[{"plugType":0,"targetSOClevel":90},
+                                          {"plugType":1,"targetSOClevel":80}]}' \
   -- "sid: $SID" "vinkey: $VIN"
+
+# Charging state, for proving the above
+kia_curl POST cmm/gvi "$GVI" -- "sid: $SID" "vinkey: $VIN" \
+  | jq '.payload.vehicleInfoList[0].lastVehicleInfo.vehicleStatusRpt.vehicleStatus.evStatus
+        | {batteryCharge, batteryStatus, batteryPlugin}'
 ```
 
 ## 5. Prove it landed

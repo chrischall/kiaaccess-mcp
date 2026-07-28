@@ -46,8 +46,14 @@ MFA**. So you do the SMS dance once and then never again — save the `rmtoken`.
 > `enforceRecaptcha` and **permanently break shell-based login**. Fix the
 > credential and try once.
 
-Store the `rmtoken` at `~/.kiaaccess-mcp/session.json` with `chmod 600`. It is a
-credential: it re-authenticates the account without a password prompt.
+Store the `rmtoken` at `$KIA_SESSION` (default `~/.kiaaccess-mcp/curl-session.json`)
+with `chmod 600`. It is a credential: it re-authenticates the account without a
+password prompt.
+
+> Do **not** write it to `~/.kiaaccess-mcp/session.json`. That path belongs to the
+> `kiaaccess-mcp` server, whose store is keyed by `accountId` with a different
+> schema — overwriting it corrupts the server's session and forces it back
+> through MFA.
 
 ## Calling
 
@@ -91,9 +97,13 @@ Three traps when writing that comparison:
 
 ## Verification status
 
-Verified live against a 2024 EV9: all reads, plus `rems/door/lock`,
-`rems/door/unlock`, `rems/start`, `rems/stop`.
+Every endpoint here was verified live against a 2024 EV9 — all reads, the door
+and climate commands, and (against a plugged-in car) `evc/charge`, `evc/cancel`
+and `evc/sts`, each proven by a re-read rather than a 200.
 
-**Unverified** — shapes are from the open-source client, not confirmed against a
-real vehicle: `evc/charge`, `evc/cancel`, `evc/sts`. Also, `rems/start`'s
-temperature may not apply (a start requesting 70 left `airTemp.value` at 72).
+Charging proof fields live under `vehicleStatus.evStatus`: `batteryCharge`
+(true while charging), `batteryStatus` (SOC %), `batteryPlugin`. `evc/sts` is
+proven by re-reading `evc/gts`.
+
+One caveat: **`rems/start`'s temperature may not apply** — a start requesting 70
+left `airTemp.value` at 72. Treat it as best-effort.
