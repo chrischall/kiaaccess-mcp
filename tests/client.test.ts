@@ -382,6 +382,213 @@ describe('reads', () => {
   });
 });
 
+/**
+ * Kia scopes `vinkey` to the CURRENT session: minting a new `sid` rotates every
+ * vehicle key, and a key from a previous session fails with errorCode 1005,
+ * "Invalid vehicle for current session".
+ *
+ * The original bug was a two-part trap. That message contains the word
+ * "session", so `isSessionExpiredStatus`'s substring heuristic classified it as
+ * a dead session and re-ran `prof/authUser` — which rotated the keys AGAIN. Each
+ * attempt therefore invalidated the very key the caller had just fetched from
+ * `ownr/gvl`, which is why a freshly-fetched key failed exactly like a stale one
+ * and why the reported `vehicleKey` changed between two calls minutes apart.
+ */
+describe('rotated vinkey recovery', () => {
+  const STALE_KEY = 'FAKE-VEHICLE-KEY-OLD';
+  const FRESH_KEY = 'FAKE-VEHICLE-KEY-NEW';
+  const VIN = 'FAKEVIN0000000001';
+
+  const INVALID_VEHICLE = {
+    body: {
+      status: { statusCode: 1, errorType: 1, errorCode: 1005, errorMessage: 'Invalid vehicle for current session' },
+    },
+  };
+
+  const vehicleList = (vehicleKey: string): StubResponse => ({
+    body: { status: OK, payload: { vehicleSummary: [{ vehicleKey, vin: VIN, nickName: 'Fake Car' }] } },
+  });
+
+  const statusOk = (vinKey: string): StubResponse => ({
+    body: {
+      status: OK,
+      payload: { vehicleInfoList: [{ vinKey, lastVehicleInfo: { vehicleStatusRpt: { vehicleStatus: { doorLock: true } } } }] },
+    },
+  });
+
+  const paths = (calls: Recorded[]): string[] => calls.map((c) => c.url.split('/v1/')[1]);
+
+  it('re-resolves the key against a fresh ownr/gvl and replays, without re-authenticating', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      AUTH_OK,
+      vehicleList(STALE_KEY), // caller learns STALE_KEY (and its VIN)
+      INVALID_VEHICLE, // …then Kia rotates it out from under them
+      vehicleList(FRESH_KEY), // re-list under the SAME sid
+      statusOk(FRESH_KEY), // replay succeeds
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await expect(client.getVehicleStatus(STALE_KEY)).resolves.toMatchObject({ vinKey: FRESH_KEY });
+
+    // Critically: exactly ONE prof/authUser. Re-authenticating would rotate the
+    // keys again and make this unrecoverable.
+    expect(paths(calls)).toEqual(['prof/authUser', 'ownr/gvl', 'cmm/gvi', 'ownr/gvl', 'cmm/gvi']);
+    expect(calls.filter((c) => c.url.endsWith('prof/authUser'))).toHaveLength(1);
+  });
+
+  it('rewrites the vinkey in the cmm/gvi BODY as well as the header on replay', async () => {
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, vehicleList(STALE_KEY), INVALID_VEHICLE, vehicleList(FRESH_KEY), statusOk(FRESH_KEY)]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await client.getVehicleStatus(STALE_KEY);
+
+    const replay = calls[4];
+    expect(replay.init.headers.vinkey).toBe(FRESH_KEY);
+    // cmm/gvi is the one endpoint that also carries the key in the body — a
+    // replay that rewrote only the header would still ask for the dead vehicle.
+    expect(JSON.parse(replay.init.body!).vinKey).toEqual([FRESH_KEY]);
+  });
+
+  it('recovers a command endpoint too (the key is only in the header there)', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      AUTH_OK,
+      vehicleList(STALE_KEY),
+      INVALID_VEHICLE,
+      vehicleList(FRESH_KEY),
+      { headers: { xid: 'FAKE-XID' }, body: { status: OK } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await expect(client.lockDoors(STALE_KEY)).resolves.toMatchObject({ xid: 'FAKE-XID' });
+    expect(calls[4].init.headers.vinkey).toBe(FRESH_KEY);
+  });
+
+  it('reuses the remap for later calls instead of re-listing every time', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      AUTH_OK,
+      vehicleList(STALE_KEY),
+      INVALID_VEHICLE,
+      vehicleList(FRESH_KEY),
+      statusOk(FRESH_KEY),
+      statusOk(FRESH_KEY), // second read goes straight out with the fresh key
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await client.getVehicleStatus(STALE_KEY);
+    await client.getVehicleStatus(STALE_KEY);
+
+    expect(paths(calls)).toEqual(['prof/authUser', 'ownr/gvl', 'cmm/gvi', 'ownr/gvl', 'cmm/gvi', 'cmm/gvi']);
+    expect(calls[5].init.headers.vinkey).toBe(FRESH_KEY);
+  });
+
+  it('falls back to the sole enrolled vehicle when the stale key was never seen in a list', async () => {
+    // No prior listVehicles() — nothing maps the caller's key to a VIN, but with
+    // exactly one enrolled car there is no ambiguity about what they meant.
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, INVALID_VEHICLE, vehicleList(FRESH_KEY), statusOk(FRESH_KEY)]);
+
+    await expect(makeClient(fetchImpl).getVehicleStatus(STALE_KEY)).resolves.toMatchObject({ vinKey: FRESH_KEY });
+    expect(calls[3].init.headers.vinkey).toBe(FRESH_KEY);
+  });
+
+  it('surfaces the error instead of looping when the key is genuinely unknown', async () => {
+    const OTHER_VIN = 'FAKEVIN0000000002';
+    const { fetchImpl, calls } = stubFetch([
+      AUTH_OK,
+      INVALID_VEHICLE,
+      // Two cars, neither matching the caller's key — no safe remap exists.
+      {
+        body: {
+          status: OK,
+          payload: {
+            vehicleSummary: [
+              { vehicleKey: FRESH_KEY, vin: VIN },
+              { vehicleKey: 'FAKE-VEHICLE-KEY-OTHER', vin: OTHER_VIN },
+            ],
+          },
+        },
+      },
+    ]);
+
+    await expect(makeClient(fetchImpl).getVehicleStatus(STALE_KEY)).rejects.toThrow(/Invalid vehicle for current session/);
+    // One attempt, one re-list, then stop. No replay, and no re-auth.
+    expect(paths(calls)).toEqual(['prof/authUser', 'cmm/gvi', 'ownr/gvl']);
+  });
+
+  it('does not replay when the rejected key is still the current one', async () => {
+    // 1005 for a key `ownr/gvl` still lists is not a rotation — it means
+    // something else, and replaying the identical request would just fail again.
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, INVALID_VEHICLE, vehicleList(STALE_KEY)]);
+
+    await expect(makeClient(fetchImpl).getVehicleStatus(STALE_KEY)).rejects.toThrow(/Invalid vehicle for current session/);
+    expect(paths(calls)).toEqual(['prof/authUser', 'cmm/gvi', 'ownr/gvl']);
+  });
+
+  it('ignores a list entry with no vin, which cannot anchor a remap', async () => {
+    const { fetchImpl } = stubFetch([
+      AUTH_OK,
+      // Kia omitted the vin here, so there is nothing stable to match on later.
+      { body: { status: OK, payload: { vehicleSummary: [{ vehicleKey: STALE_KEY }, { vehicleKey: 'FAKE-KEY-2', vin: VIN }] } } },
+      INVALID_VEHICLE,
+      // Two cars back, and the rejected key's vin was never learned — no
+      // unambiguous remap, so Kia's error stands.
+      {
+        body: {
+          status: OK,
+          payload: {
+            vehicleSummary: [
+              { vehicleKey: FRESH_KEY, vin: 'FAKEVIN0000000009' },
+              { vehicleKey: 'FAKE-KEY-3', vin: VIN },
+            ],
+          },
+        },
+      },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await expect(client.getVehicleStatus(STALE_KEY)).rejects.toThrow(/Invalid vehicle for current session/);
+  });
+
+  it('does not replay twice when the fresh key also fails', async () => {
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, vehicleList(STALE_KEY), INVALID_VEHICLE, vehicleList(FRESH_KEY), INVALID_VEHICLE]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await expect(client.getVehicleStatus(STALE_KEY)).rejects.toThrow(/Invalid vehicle for current session/);
+    expect(paths(calls)).toEqual(['prof/authUser', 'ownr/gvl', 'cmm/gvi', 'ownr/gvl', 'cmm/gvi']);
+  });
+
+  it('drops the remap when the sid rotates, since the keys rotate with it', async () => {
+    const NEWER_KEY = 'FAKE-VEHICLE-KEY-NEWER';
+    const { fetchImpl, calls } = stubFetch([
+      AUTH_OK,
+      vehicleList(STALE_KEY),
+      INVALID_VEHICLE,
+      vehicleList(FRESH_KEY),
+      statusOk(FRESH_KEY),
+      // A genuine session expiry re-mints the sid — every key rotates again, so
+      // the cached STALE_KEY -> FRESH_KEY remap is now worthless.
+      { body: { status: { statusCode: 1, errorCode: 5001, errorMessage: 'Session Key is either invalid or expired' } } },
+      { headers: { sid: 'fake-sid-2' }, body: { status: OK } },
+      INVALID_VEHICLE,
+      vehicleList(NEWER_KEY),
+      statusOk(NEWER_KEY),
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await client.getVehicleStatus(STALE_KEY);
+    await expect(client.getVehicleStatus(STALE_KEY)).resolves.toMatchObject({ vinKey: NEWER_KEY });
+
+    expect(calls[9].init.headers.vinkey).toBe(NEWER_KEY);
+    expect(calls[9].init.headers.sid).toBe('fake-sid-2');
+  });
+});
+
 describe('commands', () => {
   beforeEach(() => {
     process.env.KIA_USERNAME = 'driver@example.test';

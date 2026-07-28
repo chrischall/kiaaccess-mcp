@@ -56,6 +56,19 @@ export const KIA_ERROR_INVALID_CREDENTIALS = 1001;
 /** Email rejected on format/domain before the credentials are even checked. */
 export const KIA_ERROR_INVALID_EMAIL = 1037;
 
+/**
+ * `Invalid vehicle for current session` — the `vinkey` is not one this session
+ * knows about.
+ *
+ * **Kia scopes vehicle keys to the session.** Minting a new `sid` rotates every
+ * `vehicleKey`, so a key read from `ownr/gvl` under an earlier session is
+ * rejected with this code even though the car, the account and the `sid` are all
+ * fine. The cure is to re-read `ownr/gvl` under the CURRENT session and replay
+ * with the key it returns — never to re-authenticate, which would rotate the
+ * keys again (see {@link isSessionExpiredStatus}).
+ */
+export const KIA_ERROR_INVALID_VEHICLE_FOR_SESSION = 1005;
+
 /** The error codes that mean "Kia rejected these credentials" — never retried. */
 export const CREDENTIAL_REJECTION_ERROR_CODES: readonly number[] = [
   KIA_ERROR_INVALID_CREDENTIALS,
@@ -357,17 +370,41 @@ export function isCredentialRejection(status: KiaStatus): boolean {
 }
 
 /**
+ * Whether Kia rejected the `vinkey` as not belonging to the current session
+ * (errorCode {@link KIA_ERROR_INVALID_VEHICLE_FOR_SESSION}).
+ *
+ * Keyed off the **errorCode, not the message**: the message happens to contain
+ * the word "session", which is exactly what made this indistinguishable from a
+ * real session expiry — see {@link isSessionExpiredStatus}.
+ */
+export function isInvalidVehicleForSessionStatus(status: KiaStatus): boolean {
+  return status.statusCode !== 0 && status.errorCode === KIA_ERROR_INVALID_VEHICLE_FOR_SESSION;
+}
+
+/**
  * Heuristic: does this failure mean the `sid` went stale and a silent refresh
  * should be attempted?
  *
  * **UNVERIFIED.** The live capture never observed an expired session, so no
  * error code for it is known. This matches on the message shape instead and is
- * deliberately conservative: a credential rejection is explicitly excluded so a
- * wrong password can never be laundered into a retry loop.
+ * deliberately conservative: two failures that are NOT a dead session are
+ * excluded by code before the substring test runs.
+ *
+ *  - A credential rejection, so a wrong password can never be laundered into a
+ *    retry loop.
+ *  - `Invalid vehicle for current session` (errorCode 1005). This one is the
+ *    reason the exclusions are explicit rather than incidental: its message
+ *    contains "session", so the regex below classified a merely **rotated
+ *    `vinkey`** as a dead session and re-ran `prof/authUser`. That mints a new
+ *    session — which rotates every vehicle key again. Each attempt therefore
+ *    destroyed the key the caller had just fetched, so a freshly-read key failed
+ *    exactly like a stale one and the account's `vehicleKey` appeared to change
+ *    on its own. It is handled by re-resolving the key instead (`KiaClient`).
  */
 export function isSessionExpiredStatus(status: KiaStatus): boolean {
   if (status.statusCode === 0) return false;
   if (isCredentialRejection(status)) return false;
+  if (isInvalidVehicleForSessionStatus(status)) return false;
   const message = status.errorMessage?.toLowerCase() ?? '';
   return /session|re-?login|expired/.test(message);
 }
