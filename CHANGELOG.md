@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.3.0...v0.4.0) (2026-07-28)
+
+
+### Features
+
+* **connector:** drop the error banner from the code prompt ([#20](https://github.com/chrischall/kiaaccess-mcp/issues/20)) ([43f15e2](https://github.com/chrischall/kiaaccess-mcp/commit/43f15e2507ee66061d426ba7f71759525211fbb0))
+* **connector:** hide the code box until Kia has actually sent a code ([#17](https://github.com/chrischall/kiaaccess-mcp/issues/17)) ([fcb4945](https://github.com/chrischall/kiaaccess-mcp/commit/fcb49455354ba6938fe54116db530ea9c3fd743e))
+
+
+### Bug Fixes
+
+* **connector:** keep the code box revealed when OTP verification fails ([#21](https://github.com/chrischall/kiaaccess-mcp/issues/21)) ([9d994d0](https://github.com/chrischall/kiaaccess-mcp/commit/9d994d004aea4e67f3c85fdb34bd685b73c12148))
+
 ## [0.3.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.2.0...v0.3.0) (2026-07-28)
 
 

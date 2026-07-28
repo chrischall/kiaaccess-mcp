@@ -2,7 +2,7 @@
   "name": "kiaaccess",
   "metadata": {
     "description": "Kia Access vehicle tools for Claude — authenticates with your own Kia account against the Kia Owners API used by the Kia Access mobile app",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "owner": {
     "name": "Chris Chall",
@@ -13,7 +13,7 @@
       "name": "kiaaccess",
       "source": "./",
       "description": "Vehicle status, location, odometer, EV charge state, and confirm-gated door, climate, and charging commands",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "author": {
         "name": "Chris Chall"
       },
