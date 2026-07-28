@@ -89,8 +89,9 @@ describe('Kia Cloudflare connector — OAuth surface', () => {
     // does keep one — but there must be no field asking the user to supply it.
     expect(html).not.toMatch(/name=["']rmtoken["']/i);
     expect(html).not.toMatch(/label[^>]*>[^<]*remember-me/i);
-    // A code box, explained inline: it is blank on the first submit.
-    expect(html).toMatch(/code/i);
+    // Pin the actual field — a bare /code/i would still pass if the input were
+    // removed entirely, since the surrounding copy mentions codes.
+    expect(html).toMatch(/name=["']otp["']/);
     // Only the password is masked; the single-use code stays readable.
     expect(html.match(/type="password"/g)).toHaveLength(1);
     // The consent text must admit the password is stored, not just checked.
