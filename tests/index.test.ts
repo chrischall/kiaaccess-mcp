@@ -59,7 +59,7 @@ const READ_ONLY_ROSTER = [
   'kia_verify_otp',
 ];
 
-/** `comfort` adds climate and the (unverified) charging commands. */
+/** `comfort` adds the climate and charging commands. */
 const COMFORT_ROSTER = [
   ...READ_ONLY_ROSTER,
   'kia_set_charge_limits',

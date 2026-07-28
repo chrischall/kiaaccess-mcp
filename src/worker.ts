@@ -17,11 +17,11 @@
  *    bootstrap. It cannot complete in a Worker: the passcode arrives by
  *    SMS/email minutes later on a different device, and Kia's ~2-minute OTP
  *    window plus the reCAPTCHA escalation on failed attempts make a
- *    "try it and see" flow actively harmful. The bootstrap happens once,
- *    locally; this connector consumes its output.
- *  - `kia_export_refresh_token` — it would hand back the very credential the
- *    user just pasted in, from a runtime that was given it rather than one that
- *    minted it. Nothing here needs it, so it is not registered.
+ *    "try it and see" flow actively harmful. The bootstrap is handled by the
+ *    login page itself (a two-submission OTP flow), not by tools.
+ *  - `kia_export_refresh_token` — it would hand a full MFA bypass to any
+ *    authenticated session, over the network, from a runtime that has no reason
+ *    to emit it. Nothing here needs it, so it is not registered.
  *
  * That is why `registerSessionStatusTool` is used instead of
  * `registerSessionTools`.

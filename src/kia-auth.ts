@@ -8,11 +8,12 @@
  * different device, with no place to put it. What makes the hosted connector
  * possible is the `rmtoken` refresh (docs/KIA-API.md §4): `prof/authUser` with
  * an `rmtoken` header returns a fresh `sid` with **no MFA challenge**, and the
- * `rmtoken` is not rotated. So the MFA bootstrap runs ONCE on the user's local
- * stdio server, and the resulting token is pasted into this login page —
- * that is what the stdio server's `kia_export_refresh_token` tool exists for.
+ * `rmtoken` is not rotated. So the challenge only has to be answered ONCE — and
+ * the login page answers it here, as a two-submission flow (see
+ * {@link kiaAuth.login}), rather than sending the user to a local stdio server
+ * to mint a token and paste it back.
  *
- * ## Why all three fields are stored
+ * ## Why the password and token are both stored
  *
  * The refresh call sends the `rmtoken` **and** the full credential body
  * (`userId`/`password`) — the token alone does not mint a session. A silent
@@ -44,7 +45,7 @@ export interface KiaProps {
   username: string;
   /** Kia account password — needed on EVERY session refresh, not just once. */
   password: string;
-  /** The remember-me token exported from the user's local stdio server. */
+  /** Remember-me token, minted by this connector's own MFA login. */
   rmtoken: string;
   [key: string]: unknown;
 }
@@ -63,11 +64,11 @@ export interface KiaProps {
  * and no randomness (which Workers forbid at module scope anyway).
  *
  * **Uncertainty kept visible:** the live capture never tested whether Kia binds
- * an `rmtoken` to the `deviceid` it was minted against. If it does, this derived
- * id will not match the one the user's local stdio server generated and the
- * refresh will fail — which is precisely why {@link kiaAuth.login} performs a
- * real refresh at login time instead of trusting the paste. See the hint in
- * {@link describeLoginFailure}.
+ * an `rmtoken` to the `deviceid` it was minted against. It matters less now than
+ * under the old paste flow — the token is minted BY this Worker, under this very
+ * derived id, so there is no cross-device mismatch to bind against. Either way
+ * {@link kiaAuth.login} performs a real refresh plus a live read before storing
+ * anything, so a binding failure surfaces on the form.
  */
 export function hostedDeviceId(accountId: string): string {
   const seed = accountId.trim().toLowerCase();
