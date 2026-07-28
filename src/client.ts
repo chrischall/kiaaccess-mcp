@@ -85,6 +85,21 @@ export interface KiaVehicleSummary {
 }
 
 /**
+ * One seat's heat/vent state, inside {@link KiaClimateStatus.heatVentSeat}.
+ *
+ * **The encoding is UNVERIFIED.** `docs/KIA-API.md` records a single observed
+ * sample (`{ heatVentType: 0, heatVentLevel: 1 }`), which pins down neither
+ * which `heatVentType` means heating rather than ventilation nor which
+ * `heatVentLevel` means off. Both values are therefore passed through as
+ * numbers and never translated into words — see `registerVehiclesTools`.
+ */
+export interface KiaSeatHeatVent {
+  heatVentType?: number;
+  heatVentLevel?: number;
+  [key: string]: unknown;
+}
+
+/**
  * The nested climate block. There is **no flat `airCtrlOn` field** — reading one
  * yields `undefined`, which compares equal across a command and looks like "no
  * change". The whole `climate` object is ABSENT unless `cmm/gvi` is called with
@@ -94,6 +109,16 @@ export interface KiaClimateStatus {
   airCtrl?: boolean;
   defrost?: boolean;
   airTemp?: { value?: string; unit?: number };
+  /**
+   * Per-seat heat/vent state, keyed by seat position (`driverSeat`,
+   * `passengerSeat`, …). Gated on the same `seatHeatCoolOption: "1"` flag as the
+   * rest of this block, so it arrives on every climate-bearing read.
+   *
+   * Absent does NOT mean the car has no heated seats: that is a *capability*
+   * question, and capability lives in `cmm/gvi`'s `vehicleFeature` block, which
+   * this server does not currently request.
+   */
+  heatVentSeat?: Record<string, KiaSeatHeatVent>;
   [key: string]: unknown;
 }
 

@@ -23,7 +23,7 @@ import { McpToolError, SafePathSegment, jsonResult, toolAnnotations } from '@chr
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { extractVehicleStatus } from '../client.js';
-import type { KiaClient, KiaVehicleInfo, KiaVehicleSummary } from '../client.js';
+import type { KiaClient, KiaSeatHeatVent, KiaVehicleInfo, KiaVehicleSummary } from '../client.js';
 
 /** How many trailing VIN characters stay visible. */
 const VIN_VISIBLE_SUFFIX = 6;
@@ -106,6 +106,43 @@ function readCoordinate(coord: unknown, key: 'lat' | 'lon'): number | undefined 
   return typeof value === 'number' ? value : undefined;
 }
 
+/**
+ * Report the per-seat heat/vent block.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ *  1. **Decode the numbers.** `docs/KIA-API.md` has one observed sample
+ *     (`{ heatVentType: 0, heatVentLevel: 1 }`), which identifies neither the
+ *     "off" value nor which type is heating rather than ventilation. Rendering
+ *     "ventilating on level 3" would be an invention about a physical comfort
+ *     feature the user would then act on, so the raw numbers are passed through
+ *     and labelled unverified.
+ *  2. **Turn absence into a capability claim.** A missing block means the read
+ *     did not carry seat data — not that the car has no heated seats. Capability
+ *     lives in `cmm/gvi`'s `vehicleFeature` block, which this server does not
+ *     request (it sends `vehicleFeature: "0"`).
+ */
+function describeSeats(seats: Record<string, KiaSeatHeatVent> | undefined): Record<string, unknown> {
+  if (seats === undefined) {
+    return {
+      present: false,
+      note:
+        'No heatVentSeat block in this response. That is NOT the same as "the seats are off", and NOT the same as ' +
+        '"this car has no heated or ventilated seats" — capability is reported by cmm/gvi\'s vehicleFeature block, ' +
+        'which this server does not request.',
+    };
+  }
+  return {
+    present: true,
+    positions: seats,
+    note:
+      'Raw per-seat values exactly as Kia reports them. The heatVentType / heatVentLevel encoding is UNVERIFIED — ' +
+      'only a single sample ({heatVentType: 0, heatVentLevel: 1}) has been observed, which identifies neither the ' +
+      'off value nor which type is heating rather than ventilation. Do not tell the user a seat is heating, ' +
+      'ventilating, or off based on these numbers.',
+  };
+}
+
 /** The optional vehicle selector every tool in this file accepts. */
 const vehicleKeyInput = SafePathSegment.describe(
   'vehicleKey from kia_list_vehicles. Optional: defaults to the only vehicle when the account has exactly one.',
@@ -136,6 +173,10 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'Requested with airTempRange/seatHeatCoolOption = "1" so the nested `climate` object is present; when it is ' +
         'still absent the result says so rather than reporting climate as off. Note `ign3` (not `engine`) is the ' +
         'ignition on an EV, and `syncDate` advances on every read, so it never proves anything changed. ' +
+        'Per-seat heat/vent state is reported under `climate.seats` as the RAW numbers Kia sends: the ' +
+        '`heatVentType`/`heatVentLevel` encoding is UNVERIFIED, so do not tell the user a seat is heating, ' +
+        'ventilating or off based on them. An absent seat block means this read carried no seat data — it does NOT ' +
+        'mean the car lacks heated seats, which this server cannot currently determine. ' +
         'Pass include_raw for the untrimmed status block (battery/EV detail, doors, tyres, …).',
       annotations: toolAnnotations({ title: 'Kia vehicle status', readOnly: true, idempotent: true, openWorld: true }),
       inputSchema: {
@@ -183,6 +224,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
                 airCtrl: climate.airCtrl,
                 defrost: climate.defrost,
                 airTemp: climate.airTemp,
+                seats: describeSeats(climate.heatVentSeat),
                 note:
                   'airTemp is what the car reports; it may be its own last-set target rather than the last remote ' +
                   'request (unverified — a start requesting 70 still read back 72).',
