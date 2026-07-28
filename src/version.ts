@@ -6,4 +6,4 @@
 // Keep the release marker comment on the export line only — the version-sync
 // test scans every line carrying that marker and fails any that has no version
 // literal on it, including prose in comments.
-export const VERSION = '0.0.0'; // x-release-please-version
+export const VERSION = '0.1.0'; // x-release-please-version
