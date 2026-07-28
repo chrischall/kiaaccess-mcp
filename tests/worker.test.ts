@@ -98,6 +98,12 @@ describe('Kia Cloudflare connector — OAuth surface', () => {
     // it. Assert the wiring, not just the flag on the auth object.
     expect(html).toContain('x-connector-ajax');
     expect(html).toContain('id="cx-error"');
+    // The code box must NOT be usable before a code has been requested: visible
+    // it misleads, and required it blocks the very submit that requests one.
+    const otpInput = html.match(/<input[^>]*name="otp"[^>]*>/)?.[0] ?? '';
+    expect(otpInput).toContain('disabled');
+    expect(otpInput).not.toContain('required');
+    expect(html).toContain('data-reveal="otp"');
     // …and that the no-JS path is intact, since a strict CSP would block the
     // script and the plain POST is the only thing left.
     expect(html).toContain('<form method="post">');
