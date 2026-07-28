@@ -26,7 +26,10 @@
   //   PLACEHOLDER — the operator fills this in before the first deploy:
   //     npx wrangler kv namespace create kiaaccess-connector-oauth
   //   then paste the printed id below. See docs/DEPLOY-CONNECTOR.md.
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+  // Namespace title `kiaaccess-connector-oauth` — one per connector. The binding
+  // NAME is always OAUTH_KV (workers-oauth-provider hardcodes it); only the id
+  // differs. Two connectors sharing an id would cross-wire their OAuth grants.
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "5773afe3357541a79f60d8bb67a27221" }],
 
   // Command-registration ceiling for the HOSTED deployment, read by
   // `getKiaWriteMode()` through `process.env`. "comfort" registers climate and
