@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.4.0...v0.4.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **client:** recover a rotated vinkey and accept a quoted temperature ([#23](https://github.com/chrischall/kiaaccess-mcp/issues/23)) ([400feb5](https://github.com/chrischall/kiaaccess-mcp/commit/400feb525c8b03bebf89b5d994752831a2f2bcb0))
+
+
+### Documentation
+
+* **connector:** correct the code-box behaviour on the login page ([#26](https://github.com/chrischall/kiaaccess-mcp/issues/26)) ([b349c44](https://github.com/chrischall/kiaaccess-mcp/commit/b349c443ea2ab4bf0ef0d3fdec3b54d3bcd712dd)), closes [#18](https://github.com/chrischall/kiaaccess-mcp/issues/18)
+
 ## [0.4.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.3.0...v0.4.0) (2026-07-28)
 
 
