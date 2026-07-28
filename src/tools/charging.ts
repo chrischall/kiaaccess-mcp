@@ -57,8 +57,10 @@ const schemaChargeTarget = z.object({
     .min(0)
     .max(1)
     .describe(
-      'Plug type, 0 or 1 — one entry per plug type (AC and DC). Which number is which is NOT verified: ' +
-        'read the current targets first and mirror the plugType values it returns.',
+      'Plug type: 1 = AC, 0 = DC per the open-source Kia client, though this server has not confirmed it ' +
+        'against a vehicle (both targets were set and restored together during verification, so the two were ' +
+        'never distinguished). Safest usage is unchanged: read the current targets first and mirror the ' +
+        'plugType values it returns. Note evc/sts REPLACES the list, so send an entry for BOTH plug types.',
     ),
   targetSOClevel: z
     .number()

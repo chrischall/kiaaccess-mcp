@@ -165,6 +165,13 @@ Body `{ "requestType": 0 }`. Slower; wakes the telematics unit.
 Response: `payload.targetSOClist[]` of `{ plugType: number, targetSOClevel: number }`
 (one entry per plug type — AC and DC).
 
+> **`plugType` 1 = AC, 0 = DC — documented, not confirmed here.** The mapping is
+> consistent across two call sites in the open-source `hyundai_kia_connect_api`
+> client (`ac_values`/`dc_values` filtered on `plugType == 1`/`== 0`). This server
+> did not verify it: both targets were changed and restored *together* during the
+> `evc/sts` run, so the two were never distinguished. To confirm, set the two plug
+> types to *different* values and read them back against the car's own app.
+
 ### `POST cmm/gts` — global status flags (**not** a per-action poll)
 
 Body `{ "xid": "<action id>" }`, where the action id came back as the **`Xid`
