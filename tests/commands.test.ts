@@ -329,10 +329,13 @@ describe('confirm gate', () => {
     const tool = tools.find((t) => t.name === 'kia_start_climate');
     const temperature = (tool?.inputSchema as { properties?: Record<string, { anyOf?: unknown[] }> } | undefined)
       ?.properties?.temperature;
-    // A host that only sees `integer` in the union has no reason to quote the
-    // value — but one that does quote it must find a branch that accepts it.
-    expect(JSON.stringify(temperature)).toContain('string');
-    expect(temperature?.anyOf?.length).toBeGreaterThanOrEqual(2);
+    // Assert the branch this fix ADDED. The pre-fix two-branch union already
+    // published a `{"type":"string","enum":["LOW","HIGH"]}` entry, so a looser
+    // "contains a string somewhere" check passes against the broken schema and
+    // cannot fail on the regression it documents. Naming the pattern also pins
+    // down which side of the Zod pipe is published (input, not output) — the
+    // input side is the one a host reads to decide how to encode the value.
+    expect(temperature?.anyOf).toContainEqual(expect.objectContaining({ type: 'string', pattern: '^\\d+$' }));
     await harness.close();
   });
 });

@@ -306,10 +306,10 @@ interface KiaRequestOptions {
   /** Sent as the `vinkey` header; also enables the rotated-key recovery. */
   vinKey?: string;
   /**
-   * Rebuilds the body when a rotated `vinkey` forces a replay. Only needed by an
-   * endpoint that carries the key IN the body as well as the header — `cmm/gvi`
-   * is the only one, and a replay that missed it would re-request the dead
-   * vehicle under a valid header.
+   * Builds the body from the key actually being sent, for an endpoint that
+   * carries the key IN the body as well as the header — `cmm/gvi` is the only
+   * one. Such an endpoint supplies this INSTEAD of `body`, so a remapped header
+   * can never end up over a body naming a different vehicle.
    */
   bodyForVinKey?: (vinKey: string) => unknown;
 }
@@ -555,23 +555,36 @@ export class KiaClient {
     // Surface the deferred config error before anything else happens.
     this.requireCredentials();
 
-    const vinKey = opts.vinKey === undefined ? undefined : this.currentVinKey(opts.vinKey);
-    let raw = await this.send(path, { ...opts, vinKey });
-
-    if (vinKey !== undefined && isInvalidVehicleForSessionStatus(statusOf(raw.body))) {
-      const fresh = await this.resolveSessionVinKey(vinKey);
-      if (fresh !== null) {
-        // `cmm/gvi` is the one endpoint that also carries the key in its BODY;
-        // rewriting only the header would replay a request for the dead vehicle.
-        raw = await this.send(path, {
-          ...opts,
-          vinKey: fresh,
-          body: opts.bodyForVinKey === undefined ? opts.body : opts.bodyForVinKey(fresh),
-        });
-      }
-    }
+    const raw =
+      opts.vinKey === undefined ? await this.send(path, opts) : await this.sendVehicleScoped(path, opts, opts.vinKey);
 
     return { envelope: assertKiaSuccess<T>(raw.body, path), xid: raw.headers.get('xid') };
+  }
+
+  /**
+   * A call carrying a `vinkey`, with the rotated-key recovery described on
+   * {@link dispatch}.
+   *
+   * The body is derived from whichever key is actually being sent, at BOTH the
+   * initial send and the replay. `cmm/gvi` repeats the key inside its body, and
+   * a request whose header and body name different vehicles is exactly the
+   * failure this recovery exists to prevent — so there is deliberately no path
+   * that sends a caller-built body alongside a key the caller did not supply.
+   */
+  private async sendVehicleScoped(path: string, opts: KiaRequestOptions, requested: string): Promise<KiaRawResponse> {
+    const bodyFor = (key: string): unknown => (opts.bodyForVinKey === undefined ? opts.body : opts.bodyForVinKey(key));
+
+    const vinKey = this.currentVinKey(requested);
+    const raw = await this.send(path, { ...opts, vinKey, body: bodyFor(vinKey) });
+    if (!isInvalidVehicleForSessionStatus(statusOf(raw.body))) return raw;
+
+    const fresh = await this.resolveSessionVinKey(vinKey);
+    if (fresh === null) return raw;
+
+    // Cached under the CALLER's key rather than the one that was rejected, so
+    // their key keeps resolving in a single hop instead of growing a chain.
+    this.rememberRemap(requested, fresh);
+    return this.send(path, { ...opts, vinKey: fresh, body: bodyFor(fresh) });
   }
 
   /** Every READ goes through here. */
@@ -630,10 +643,22 @@ export class KiaClient {
     return this.vinKeyRemap.get(vinKey) ?? vinKey;
   }
 
+  /** Cache a resolved key for the rest of this session. */
+  private rememberRemap(requested: string, resolved: string): void {
+    // The list read that produced `resolved` may itself have re-minted the sid,
+    // so re-check the generation before caching against it.
+    this.syncRemapGeneration();
+    this.vinKeyRemap.set(requested, resolved);
+  }
+
   /**
    * Re-resolve a rejected `vinkey` against a fresh `ownr/gvl`, or `null` when no
    * unambiguous answer exists (in which case the caller lets Kia's own error
    * stand rather than guessing at which car was meant).
+   *
+   * Pure lookup — caching is the caller's business, because the useful cache key
+   * is the one the CALLER supplied, not the (possibly already remapped) one that
+   * was rejected here.
    *
    * The list read runs on the current `sid` and carries no `vinkey` of its own,
    * so it cannot re-enter this path.
@@ -650,14 +675,7 @@ export class KiaClient {
     // With exactly one enrolled car there is nothing to disambiguate, which
     // covers a key supplied from outside this process (a transcript, a restart)
     // that was never seen in a list read here.
-    const resolved = match?.vehicleKey ?? (vehicles.length === 1 ? vehicles[0].vehicleKey : undefined);
-    if (resolved === undefined || resolved === rejected) return null;
-
-    // The list read above may itself have re-minted the sid, so re-check the
-    // generation before caching against it.
-    this.syncRemapGeneration();
-    this.vinKeyRemap.set(rejected, resolved);
-    return resolved;
+    return match?.vehicleKey ?? (vehicles.length === 1 ? vehicles[0].vehicleKey : null);
   }
 
   // -- reads ----------------------------------------------------------------
@@ -684,13 +702,13 @@ export class KiaClient {
    * config flags by default; without them the whole `climate` object is absent.
    */
   async getVehicleStatus(vinKey: string, opts?: { includeClimate?: boolean }): Promise<KiaVehicleInfo | null> {
-    const buildBody = (key: string): unknown => buildVehicleStatusBody(key, opts);
     const envelope = await this.request<{ vehicleInfoList?: KiaVehicleInfo[] }>(ENDPOINTS.vehicleStatus, {
       method: 'POST',
-      body: buildBody(vinKey),
-      // This endpoint repeats the key in the body, so a rotated-key replay has
-      // to rebuild it (see KiaRequestOptions.bodyForVinKey).
-      bodyForVinKey: buildBody,
+      // This endpoint repeats the key inside its body, so the body is built from
+      // whichever key is actually sent rather than passed in ready-made. There
+      // is deliberately no `body` here to fall out of sync with the header once
+      // a remap is in play (see KiaRequestOptions.bodyForVinKey).
+      bodyForVinKey: (key) => buildVehicleStatusBody(key, opts),
       vinKey,
     });
     return envelope.payload?.vehicleInfoList?.[0] ?? null;

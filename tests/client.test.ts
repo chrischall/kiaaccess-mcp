@@ -483,6 +483,34 @@ describe('rotated vinkey recovery', () => {
 
     expect(paths(calls)).toEqual(['prof/authUser', 'ownr/gvl', 'cmm/gvi', 'ownr/gvl', 'cmm/gvi', 'cmm/gvi']);
     expect(calls[5].init.headers.vinkey).toBe(FRESH_KEY);
+    // The header is only half of it: cmm/gvi repeats the key in its body, and a
+    // remapped header over a body still naming the dead vehicle is the same
+    // mismatch the replay exists to avoid. `kia_start_climate` makes several of
+    // these calls per invocation (baseline read, then confirmation polling), so
+    // this is the common case, not an edge one.
+    expect(JSON.parse(calls[5].init.body!).vinKey).toEqual([FRESH_KEY]);
+  });
+
+  it('keeps header and body agreeing on every endpoint that carries the key in both', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      AUTH_OK,
+      vehicleList(STALE_KEY),
+      INVALID_VEHICLE,
+      vehicleList(FRESH_KEY),
+      statusOk(FRESH_KEY),
+      statusOk(FRESH_KEY),
+      statusOk(FRESH_KEY),
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+    await client.getVehicleStatus(STALE_KEY);
+    await client.getVehicleStatus(STALE_KEY, { includeClimate: false });
+    await client.getVehicleStatus(STALE_KEY);
+
+    for (const call of calls.filter((c) => c.url.endsWith('cmm/gvi'))) {
+      expect(JSON.parse(call.init.body!).vinKey).toEqual([call.init.headers.vinkey]);
+    }
   });
 
   it('falls back to the sole enrolled vehicle when the stale key was never seen in a list', async () => {
