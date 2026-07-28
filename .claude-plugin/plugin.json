@@ -1,7 +1,7 @@
 {
   "name": "kiaaccess",
   "displayName": "Kia Access",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Kia Access vehicle tools for Claude — status, location, doors, climate, and charging via MCP",
   "author": {
     "name": "Chris Chall"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.4.1...v0.5.0) (2026-07-28)
+
+
+### Features
+
+* **vehicles:** report per-seat heat/vent state in kia_vehicle_status ([#28](https://github.com/chrischall/kiaaccess-mcp/issues/28)) ([34c11be](https://github.com/chrischall/kiaaccess-mcp/commit/34c11be3b84338820773a11d373474f65b9ad68f))
+
 ## [0.4.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.4.0...v0.4.1) (2026-07-28)
 
 
