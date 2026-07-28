@@ -113,24 +113,29 @@ connector's `OAUTH_KV` would cross-wire their OAuth grants and tokens.
 `wrangler.jsonc` pins:
 
 ```jsonc
-"vars": { "KIA_WRITE_MODE": "comfort" }
+"vars": { "KIA_WRITE_MODE": "all" }
 ```
 
 | value | registers |
 | --- | --- |
 | `none` | no vehicle commands — reads only |
-| `comfort` | climate + charging. **The car cannot be unlocked.** (deployed default) |
-| `all` | additionally door lock/unlock |
+| `comfort` | climate + charging. **The car cannot be unlocked.** |
+| `all` | **(currently deployed)**  additionally door lock/unlock |
 
 Anything unrecognized fails **closed** to `none`. The gate is structural —
 tools outside the mode are never registered, so no host setting or injected
 instruction can reach them.
 
-`comfort` is the deployed default deliberately: this Worker is reachable from
-any claude.ai session on any device, and a remote unlock is the one command
-whose worst case is a physically unsecured car. Raising it to `all` is a
-decision, not a default. `tests/worker.test.ts` asserts the pinned value, so
-changing it is a visible edit.
+`comfort` is the shipped default; this deployment runs `all` by an explicit
+operator decision (2026-07-28). Understand what that means: the Worker is
+reachable from any claude.ai session on any device, and a remote unlock is the
+one command whose worst case is a physically unsecured car. What still stands in
+the way is the OAuth login (props encrypted at rest in `OAUTH_KV`) and the
+`confirm: true` gate on every command — without it no request is sent.
+
+Lower it back to `comfort` or `none` to withdraw that reach. `tests/worker.test.ts`
+asserts the pinned value in either direction, so a change is always a visible
+edit rather than a silent drift.
 
 To override without editing the file (a secret beats a `var` of the same name):
 
