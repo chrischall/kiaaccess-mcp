@@ -317,24 +317,50 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
     }
 
     // ---- Step 2: code supplied — verify it and keep the token. ----
-    const stashed = await kv.get(stashKey);
-    if (!stashed) {
-      throw new Error(
-        'That code has expired, or no code was requested for this account. Clear the code box and submit again ' +
-          'to have a fresh one sent.',
-      );
-    }
-    const { otpKey, xid } = JSON.parse(stashed) as { otpKey: string; xid: string };
-
-    let rmtoken: string;
+    // Wrapped as a block so EVERY failure below keeps the code box revealed.
+    // The harness re-hides a revealOnDemand field on a server-side re-render
+    // unless the rejection names it (`hidden = revealOnDemand &&
+    // !revealFields.includes(name)`), so without this a wrong or expired code
+    // hides the very box the user is being told to correct — and the messages
+    // here say things like "clear the code box", pointing at a box that is no
+    // longer on the page.
+    //
+    // This only ever MATCHES the behaviour the JS path already has:
+    // `preserveFieldsOnError` submits via fetch, and the inline script only
+    // un-hides fields, never re-hides them. So the bug is invisible with
+    // JavaScript on, and strands users with it off. Enumerating throw sites
+    // instead of wrapping would silently miss the next one added.
+    //
+    // Attaching revealFields does not disguise a failure as a prompt: the
+    // harness substitutes its generic "Sign-in failed" banner only for an EMPTY
+    // message, and every rejection below carries a specific one.
     try {
-      ({ rmtoken } = await verifyOtp({ otpKey, xid, otp }, deviceId));
-    } catch (err) {
-      throw describeLoginFailure(err, password, otp);
-    }
-    // One-shot: a consumed code must not be replayable.
-    await kv.delete(stashKey);
+      const stashed = await kv.get(stashKey);
+      if (!stashed) {
+        throw new Error(
+          'That code has expired, or no code was requested for this account. Clear the code box and submit again ' +
+            'to have a fresh one sent.',
+        );
+      }
+      const { otpKey, xid } = JSON.parse(stashed) as { otpKey: string; xid: string };
 
-    return await verifiedProps({ username, password, rmtoken });
+      let rmtoken: string;
+      try {
+        ({ rmtoken } = await verifyOtp({ otpKey, xid, otp }, deviceId));
+      } catch (err) {
+        throw describeLoginFailure(err, password, otp);
+      }
+      // One-shot: a consumed code must not be replayable.
+      await kv.delete(stashKey);
+
+      return await verifiedProps({ username, password, rmtoken });
+    } catch (err) {
+      const failure = err instanceof Error ? err : new Error(String(err));
+      // Don't clobber a rejection that already chose its own reveal set.
+      if (!(failure as { revealFields?: unknown }).revealFields) {
+        Object.assign(failure, { revealFields: ['otp'] });
+      }
+      throw failure;
+    }
   },
 };

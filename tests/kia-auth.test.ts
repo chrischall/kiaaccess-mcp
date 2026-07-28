@@ -329,6 +329,30 @@ describe('kiaAuth.login — step 2 (code supplied)', () => {
     await expect(kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv))).rejects.toThrow(/connection reset/);
   });
 
+  it('keeps the code box revealed on EVERY step-2 failure', async () => {
+    // A revealOnDemand field is re-hidden on a server-side re-render unless the
+    // rejection names it, so a wrong or expired code hid the very box the error
+    // text tells the user to correct ("Clear the code box and submit again").
+    // Invisible with JS on — the inline script only ever un-hides, never
+    // re-hides — which is why it survived until a sibling connector hit it.
+    //
+    // Asserts the contract that matters: revealFields present AND a non-empty
+    // message, since an empty message renders as a silent prompt rather than
+    // the failure it is.
+    const expiredStash = (await kiaAuth
+      .login({ ...CREDS, otp: '038291' }, envWith(stubKv()))
+      .catch((e: Error) => e)) as Error & { revealFields?: string[] };
+    expect(expiredStash.revealFields).toEqual(['otp']);
+    expect(expiredStash.message).not.toBe('');
+
+    stubGlobalFetch([{ body: { status: FAIL } }]);
+    const wrongCode = (await kiaAuth
+      .login({ ...CREDS, otp: '000000' }, envWith(primed()))
+      .catch((e: Error) => e)) as Error & { revealFields?: string[] };
+    expect(wrongCode.revealFields).toEqual(['otp']);
+    expect(wrongCode.message).not.toBe('');
+  });
+
   it('reports a wrong code without retrying it', async () => {
     // A retry burns Kia's loginAttempt budget toward enforceRecaptcha, which
     // breaks server-side auth for the account permanently.
