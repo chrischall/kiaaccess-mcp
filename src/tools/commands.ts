@@ -95,6 +95,48 @@ const waitSecondsArg = z
 /** Every command tool takes the same three arguments plus its own options. */
 const baseArgs = { vinKey: vinKeyArg, waitSeconds: waitSecondsArg, confirm: schemaConfirm };
 
+/** Inclusive °F bounds Kia's own app offers for a remote climate start. */
+export const CLIMATE_TEMP_MIN_F = 62;
+export const CLIMATE_TEMP_MAX_F = 82;
+
+/** The two out-of-range values Kia accepts in `airTemp.value` instead of a number. */
+export const CLIMATE_TEMP_SENTINELS = ['LOW', 'HIGH'] as const;
+
+const fahrenheit = z.number().int().min(CLIMATE_TEMP_MIN_F).max(CLIMATE_TEMP_MAX_F);
+
+/**
+ * Target cabin temperature: a number, a `LOW`/`HIGH` sentinel — or a
+ * **string-encoded** number.
+ *
+ * That third branch is not decoration. This is the only argument in the server
+ * whose JSON Schema is a `number | string` union, and hosts filling it were
+ * observed to emit the number quoted (`"72"`). That matched neither of the first
+ * two branches, so the MCP SDK rejected every plain integer with a bare
+ * "Invalid input at temperature" while `LOW`/`HIGH` — already strings — worked,
+ * making the parameter look like it only accepted its own sentinels.
+ *
+ * Accepting the quoted form and normalising it to a number keeps ONE downstream
+ * shape (`airTempF: number | 'LOW' | 'HIGH'`), so nothing past this point has to
+ * know the wire ever carried a string. The bounds still apply: `"55"` is
+ * rejected exactly like `55`.
+ */
+const temperatureArg = z
+  .union([
+    fahrenheit,
+    z.enum(CLIMATE_TEMP_SENTINELS),
+    z
+      .string()
+      .regex(/^\d+$/, 'must be a whole number of °F, or "LOW"/"HIGH"')
+      .transform(Number)
+      .pipe(fahrenheit),
+  ])
+  .describe(
+    `Target cabin temperature in °F, ${CLIMATE_TEMP_MIN_F}–${CLIMATE_TEMP_MAX_F}, or the sentinel "LOW"/"HIGH" for ` +
+      'the ends of the range (default 70). A quoted whole number ("72") is accepted and treated as the number. ' +
+      'BEST-EFFORT / UNCONFIRMED — see docs/KIA-API.md.',
+  )
+  .optional();
+
 const NO_GTS_NOTE =
   'Proof comes from re-reading cmm/gvi and diffing the field (syncDate excluded — it advances on every read). ' +
   'cmm/gts is never polled: it reports global flags, never per-command completion.';
@@ -300,13 +342,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       annotations: { ...toolAnnotations({ title: 'Start climate', readOnly: false, idempotent: true, openWorld: true }), destructiveHint: false },
       inputSchema: {
         ...baseArgs,
-        temperature: z
-          .union([z.number().int().min(62).max(82), z.enum(['LOW', 'HIGH'])])
-          .optional()
-          .describe(
-            'Target cabin temperature in °F, 62–82, or the sentinel "LOW"/"HIGH" for the ends of the range ' +
-              '(default 70). BEST-EFFORT / UNCONFIRMED — see docs/KIA-API.md.',
-          ),
+        temperature: temperatureArg,
         durationMinutes: z
           .number()
           .int()
