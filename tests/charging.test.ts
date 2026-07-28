@@ -166,7 +166,7 @@ describe('registerChargingTools — registration', () => {
     expect(commandsMock.getKiaWriteMode).toHaveBeenCalled();
   });
 
-  it('states plainly in every write tool description that the endpoint is unverified', async () => {
+  it('tells the caller how to confirm each write, since a success status is not proof', async () => {
     harness = await harnessFor(makeClient());
     const { tools } = await harness.client.listTools();
     const byName = new Map(tools.map((t) => [t.name, t.description ?? '']));
@@ -177,7 +177,12 @@ describe('registerChargingTools — registration', () => {
       ['kia_set_charge_limits', 'evc/sts'],
     ] as const) {
       const description = byName.get(name) as string;
-      expect(description).toMatch(/UNVERIFIED/);
+      // These endpoints are verified against a real vehicle, so the description
+      // must NOT claim otherwise — but a success status still only means Kia
+      // accepted the command, so each one has to name its confirmation path.
+      expect(description).not.toMatch(/UNVERIFIED/i);
+      expect(description).toMatch(/Verified against a|Verified against a real vehicle/);
+      expect(description).toMatch(/kia_vehicle_status|evc\/gts|re-read/);
       expect(description).toContain(endpoint);
       expect(description).toMatch(/confirm/);
     }
@@ -361,7 +366,7 @@ describe('kia_set_charge_limits', () => {
 
     expect(parsed.verification.verified).toBe(false);
     expect(parsed.verification.hint).toMatch(/does not report the requested targets/);
-    expect(parsed.verification.hint).toMatch(/never been exercised against a real vehicle/);
+    expect(parsed.verification.hint).toMatch(/accepted the command|accepted the request/);
   });
 
   it('skips the baseline read and the re-read when verify:false', async () => {

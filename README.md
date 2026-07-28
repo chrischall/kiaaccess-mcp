@@ -140,9 +140,9 @@ Two more rules hold for every command:
 |---|---|---|
 | `kia_start_climate` | `comfort` | Preconditioning. Temperature is best-effort: the car may report its own last-set target instead of the one requested. |
 | `kia_stop_climate` | `comfort` | Verified by re-reading `climate.airCtrl`. |
-| `kia_start_charge` | `comfort` | **Unverified endpoint** — never exercised against a real vehicle, and the outcome cannot be checked. |
-| `kia_stop_charge` | `comfort` | **Unverified endpoint.** Do not rely on it to stop a charge that matters. |
-| `kia_set_charge_limits` | `comfort` | **Unverified endpoint**, but this one is re-read and verified afterwards. |
+| `kia_start_charge` | `comfort` | Verified. Needs the car plugged in — unplugged, Kia accepts the request and nothing happens. Confirm via `evStatus.batteryCharge`. |
+| `kia_stop_charge` | `comfort` | Verified. Confirm via `evStatus.batteryCharge`. |
+| `kia_set_charge_limits` | `comfort` | Verified, and re-read against `evc/gts` afterwards. Send both plug types — the list replaces the stored one. |
 | `kia_lock_doors` | `all` | Verified by re-reading `doorLock`. |
 | `kia_unlock_doors` | `all` | Leaves the car physically unsecured. Only run it when the user explicitly asked. |
 
