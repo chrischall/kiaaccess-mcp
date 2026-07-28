@@ -1,0 +1,25 @@
+node_modules/
+dist/
+coverage/
+.env
+*.skill
+*.mcpb
+*.tsbuildinfo
+.claude/worktrees/
+
+# Cloudflare Worker local state. `.dev.vars` is the Worker's secret file —
+# `.dev.vars.example` is the committed template. `.wrangler/` is Miniflare's
+# local KV/DO persistence, which after a `wrangler dev` login contains real
+# encrypted OAuth props (i.e. someone's Kia credentials).
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
+
+# Network captures — routinely carry session cookies and auth headers even
+# when nominally "sanitized". Shapes belong in docs/KIA-API.md; captures never
+# get committed.
+*.har
+*.jsonl
+*.curl
+

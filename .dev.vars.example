@@ -1,0 +1,27 @@
+# Local Worker dev overrides for `wrangler dev` (copy to `.dev.vars`).
+#
+# There are NO app-level Kia credentials. Every user's Kia email, password, and
+# remember-me token arrive through the connector's own login form at /authorize
+# and are stored encrypted per user in OAUTH_KV — never from this file, and
+# never from the repo's `.env` (which belongs to the stdio server).
+#
+# Nothing here is required to run the hosted connector locally. The only value
+# worth overriding is the command-registration ceiling, which `wrangler.jsonc`
+# already pins to "comfort" for the deployed Worker.
+#
+#   none    — no vehicle command tools registered (read-only)
+#   comfort — climate + charging only. The car cannot be unlocked. (deployed)
+#   all     — also registers door lock/unlock
+#
+# Leave this commented out unless you are deliberately testing another mode.
+# Anything unrecognized fails CLOSED to "none".
+# KIA_WRITE_MODE=comfort
+
+# ---------------------------------------------------------------------------
+# WARNING — `wrangler dev` also reads this repo's `.env`, which the STDIO server
+# uses, and merges those values over wrangler.jsonc's `vars`. If your `.env`
+# sets KIA_WRITE_MODE=all, your local Worker will register door lock/unlock even
+# though production does not. That is a local-dev-only difference (the deploy
+# ships wrangler.jsonc's value), but it is worth knowing before you conclude the
+# hosted roster is wrong.
+# ---------------------------------------------------------------------------

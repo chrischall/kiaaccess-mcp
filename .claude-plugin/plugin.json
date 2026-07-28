@@ -1,0 +1,22 @@
+{
+  "name": "kiaaccess",
+  "displayName": "Kia Access",
+  "version": "0.0.0",
+  "description": "Kia Access vehicle tools for Claude — status, location, doors, climate, and charging via MCP",
+  "author": {
+    "name": "Chris Chall"
+  },
+  "homepage": "https://github.com/chrischall/kiaaccess-mcp",
+  "repository": "https://github.com/chrischall/kiaaccess-mcp",
+  "license": "MIT",
+  "keywords": [
+    "kia",
+    "kia-access",
+    "uvo",
+    "vehicle",
+    "ev",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcp": "./.mcp.json"
+}

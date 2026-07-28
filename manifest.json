@@ -1,0 +1,59 @@
+{
+  "manifest_version": "0.2",
+  "name": "kiaaccess-mcp",
+  "display_name": "Kia Access",
+  "version": "0.0.0",
+  "description": "Kia Access vehicle tools — status, location, doors, climate, and charging",
+  "long_description": "Talks to the Kia Owners API the Kia Access mobile app uses, authenticating with your own Kia account email and password. Read tools cover the vehicle list, cached and force-refreshed status, location, odometer, and EV charge state. Every command that acts on the vehicle — door lock/unlock, climate start/stop, charge start/stop, charge limits — is confirm-gated: without an explicit confirm it makes no network call and returns a dry-run preview of exactly what would be sent.",
+  "author": {
+    "name": "Claude Code (AI)",
+    "url": "https://www.anthropic.com/claude"
+  },
+  "homepage": "https://github.com/chrischall/kiaaccess-mcp",
+  "documentation": "https://github.com/chrischall/kiaaccess-mcp#readme",
+  "support": "https://github.com/chrischall/kiaaccess-mcp/issues",
+  "license": "MIT",
+  "keywords": ["kia", "kia-access", "uvo", "vehicle", "ev", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/bundle.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/bundle.js"],
+      "env": {
+        "KIA_USERNAME": "${user_config.kia_username}",
+        "KIA_PASSWORD": "${user_config.kia_password}",
+        "KIA_WRITE_MODE": "${user_config.kia_write_mode}"
+      }
+    }
+  },
+  "user_config": {
+    "kia_username": {
+      "type": "string",
+      "title": "Kia account email",
+      "description": "The email address you sign in to Kia Access / the Kia Owners Portal with.",
+      "required": true
+    },
+    "kia_password": {
+      "type": "string",
+      "title": "Kia account password",
+      "description": "Your Kia account password. Stored by the host, sent only to Kia's login endpoint.",
+      "sensitive": true,
+      "required": true
+    },
+    "kia_write_mode": {
+      "type": "string",
+      "title": "Vehicle command mode",
+      "description": "\"none\" disables all vehicle commands; \"comfort\" allows climate and charging; \"all\" also allows door lock/unlock.",
+      "default": "comfort",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=22.5.0"
+    }
+  }
+}

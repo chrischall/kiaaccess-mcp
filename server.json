@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.chrischall/kiaaccess-mcp",
+  "description": "Kia Access for Claude — vehicle status, location, doors, climate, and charging",
+  "repository": {
+    "url": "https://github.com/chrischall/kiaaccess-mcp",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "kiaaccess-mcp",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "KIA_USERNAME",
+          "description": "Your Kia Owners Portal / Kia Access account email address.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "KIA_PASSWORD",
+          "description": "Your Kia Owners Portal / Kia Access account password.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "KIA_WRITE_MODE",
+          "description": "Write-tool gate: \"none\" registers no vehicle commands; \"comfort\" registers climate and charging only; \"all\" adds door lock/unlock (default \"comfort\"). Unrecognized values fail closed to \"none\".",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "KIA_DEVICE_ID",
+          "description": "Optional stable device UUID used for the app login handshake. Generated and cached under ~/.kiaaccess-mcp/ when omitted.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

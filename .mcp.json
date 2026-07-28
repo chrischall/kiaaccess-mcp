@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kiaaccess": {
+      "command": "npx",
+      "args": ["-y", "kiaaccess-mcp"],
+      "env": {
+        "KIA_USERNAME": "${KIA_USERNAME}",
+        "KIA_PASSWORD": "${KIA_PASSWORD}"
+      }
+    }
+  }
+}

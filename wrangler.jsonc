@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kiaaccess-connector",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-11-01",
+  // `nodejs_compat` is required: the shared client modules import `node:path`,
+  // `node:url`, `node:os` and `node:fs` (for the stdio server's device-id and
+  // session files). The hosted paths never CALL them — `buildHostedKiaClient`
+  // passes an explicit `deviceId` and `nullSessionIO` — but the module graph
+  // still has to load. It also populates `process.env` from the vars below,
+  // which is where `KIA_WRITE_MODE` is read from.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Kia Access is STATELESS — vehicle state is read live on every call, so
+  // there is no cache Durable Object. Only the connector's own per-session MCP
+  // agent is declared.
+  "durable_objects": {
+    "bindings": [{ "name": "MCP_OBJECT", "class_name": "KiaMcpAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["KiaMcpAgent"] }],
+
+  // kiaaccess-connector's own OAuth token store (suggested title:
+  // kiaaccess-connector-oauth). It holds each user's encrypted Kia credentials
+  // and remember-me token, so it must NEVER be shared with another connector.
+  //
+  //   PLACEHOLDER — the operator fills this in before the first deploy:
+  //     npx wrangler kv namespace create kiaaccess-connector-oauth
+  //   then paste the printed id below. See docs/DEPLOY-CONNECTOR.md.
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+
+  // Command-registration ceiling for the HOSTED deployment, read by
+  // `getKiaWriteMode()` through `process.env`. "comfort" registers climate and
+  // charging but NOT door lock/unlock: a remote connector reachable from any
+  // claude.ai session is the last place that should be able to unlock a car.
+  // Raising this to "all" is a deliberate operator decision, not a default.
+  "vars": { "KIA_WRITE_MODE": "comfort" },
+
+  // Production custom domain (matches the fleet's connector.<service>.nullnet.app
+  // pattern). The zone must be in the deploying account; wrangler provisions the
+  // hostname on deploy. Remove this route to deploy to *.workers.dev only.
+  "routes": [{ "pattern": "connector.kiaaccess.nullnet.app", "custom_domain": true }],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  }
+}

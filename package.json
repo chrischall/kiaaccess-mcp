@@ -1,0 +1,60 @@
+{
+  "name": "kiaaccess-mcp",
+  "version": "0.0.0",
+  "license": "MIT",
+  "mcpName": "io.github.chrischall/kiaaccess-mcp",
+  "description": "Kia Access MCP server for Claude — developed and maintained by AI (Claude Code)",
+  "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chrischall/kiaaccess-mcp.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "bin": {
+    "kiaaccess-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    ".claude-plugin",
+    "skills",
+    ".mcp.json",
+    "server.json"
+  ],
+  "scripts": {
+    "build": "tsc && npm run bundle",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --external:dotenv --banner:js='import { createRequire as __createRequire } from \"module\"; const require = __createRequire(import.meta.url);' --outfile=dist/bundle.js",
+    "dev": "node --env-file=.env dist/index.js",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "worker:typecheck": "tsc -p tsconfig.worker.json",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:test": "vitest run --config vitest.workers.config.ts"
+  },
+  "dependencies": {
+    "@chrischall/mcp-utils": "^0.13.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@chrischall/mcp-connector": "^1.1.1",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
+    "@cloudflare/workers-oauth-provider": "^0.8.2",
+    "@cloudflare/workers-types": "^5.20260727.1",
+    "@types/node": "^26.0.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "agents": "^0.19.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.114.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
+  }
+}

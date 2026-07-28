@@ -1,0 +1,20 @@
+{
+  // Type-checks the Cloudflare entry point that the main tsconfig deliberately
+  // EXCLUDES. `src/worker.ts` must stay out of the stdio `tsc` build (it would
+  // emit a `dist/worker.js` that Node cannot load and the npm package has no use
+  // for), but "not built" must not mean "not checked": wrangler bundles with
+  // esbuild, which strips types without looking at them, so a type error here
+  // would ship silently.
+  //
+  // Run via `npm run worker:typecheck`, and in CI alongside `worker:test`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Workers globals (Request/Response/DurableObjectNamespace/…) on top of the
+    // node types the shared client modules need under `nodejs_compat`.
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["src/worker.ts"],
+  // The base config excludes this very file; clear the list so it is visible.
+  "exclude": []
+}

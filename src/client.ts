@@ -1,0 +1,671 @@
+/**
+ * `KiaClient` — the one place that talks to the Kia Owners API.
+ *
+ * Shape rules this file exists to enforce (each was a live-verified trap; see
+ * `docs/KIA-API.md`):
+ *
+ *  - **Deferred config error.** The constructor never throws and never does
+ *    I/O, so the server boots (and answers `tools/list`) with no credentials
+ *    configured; the error surfaces on the first request instead. The
+ *    constructor is also PURE — no fetch, no randomness, no timers — because
+ *    the Cloudflare Workers runtime forbids those in global scope, where a
+ *    module-level singleton is constructed.
+ *  - **One read path, one write path.** Every read goes through the private
+ *    `request()` and every mutation through the private `command()`, so
+ *    headers, the session-expiry replay and the success check can never drift
+ *    apart between endpoints.
+ *  - **`command()` never polls `cmm/gts`.** That endpoint returns global flags
+ *    and never reports per-action completion — a client that waits on it waits
+ *    forever. The only proof a command landed is re-reading `cmm/gvi` and
+ *    diffing the field, which is what {@link KiaClient.verifyCommand} does.
+ */
+
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { McpToolError, loadDotenvSafely, readEnvVar } from '@chrischall/mcp-utils';
+import {
+  type KiaCredentials,
+  type OtpNotifyType,
+  type SendOtpResult,
+  type StartLoginResult,
+  refreshSession,
+  sendOtp,
+  startLogin,
+  verifyOtp,
+} from './auth.js';
+import { resolveDeviceId } from './device.js';
+import {
+  COMMAND_SPECS,
+  ENDPOINTS,
+  type FetchLike,
+  type KiaCommandName,
+  type KiaEnvelope,
+  type KiaStatus,
+  assertKiaSuccess,
+  buildHeaders,
+  isSessionExpiredStatus,
+  sendKiaRequest,
+} from './protocol.js';
+import { type KiaSessionIO, SidManager, diskSessionIO } from './session.js';
+
+// Load `.env` for local dev. The try/catch guards the Cloudflare Worker
+// runtime, where `import.meta.url` is undefined and `fileURLToPath(undefined)`
+// would throw during startup validation — there is no filesystem or `.env`
+// there anyway.
+try {
+  await loadDotenvSafely({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
+} catch {
+  /* v8 ignore next -- only reached in a non-Node runtime (Workers): no .env to load */
+}
+
+// ---------------------------------------------------------------------------
+// Response shapes (only the fields this server relies on are named; everything
+// else stays reachable through the index signatures).
+// ---------------------------------------------------------------------------
+
+/** An entry of `ownr/gvl`'s `payload.vehicleSummary[]`. */
+export interface KiaVehicleSummary {
+  /** The `vinkey` every vehicle-scoped call needs. */
+  vehicleKey: string;
+  vin: string;
+  nickName?: string;
+  modelName?: string;
+  modelYear?: string;
+  trim?: string;
+  colorName?: string;
+  mileage?: string;
+  /** Used for EV detection. */
+  fuelType?: number;
+  telematicsUnit?: number;
+  enrollmentStatus?: number;
+  generation?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * The nested climate block. There is **no flat `airCtrlOn` field** — reading one
+ * yields `undefined`, which compares equal across a command and looks like "no
+ * change". The whole `climate` object is ABSENT unless `cmm/gvi` is called with
+ * `vehicleConfigReq.airTempRange: "1"` and `seatHeatCoolOption: "1"`.
+ */
+export interface KiaClimateStatus {
+  airCtrl?: boolean;
+  defrost?: boolean;
+  airTemp?: { value?: string; unit?: number };
+  [key: string]: unknown;
+}
+
+/** `lastVehicleInfo.vehicleStatusRpt.vehicleStatus`. */
+export interface KiaVehicleStatus {
+  doorLock?: boolean;
+  /** The ignition proxy. On an EV `engine` stays false with climate running. */
+  ign3?: boolean;
+  engine?: boolean;
+  climate?: KiaClimateStatus;
+  /** Advances on EVERY read — never include it in change detection. */
+  syncDate?: unknown;
+  [key: string]: unknown;
+}
+
+/** An entry of `cmm/gvi`'s `payload.vehicleInfoList[]`. */
+export interface KiaVehicleInfo {
+  vinKey: string;
+  vehicleConfig?: Record<string, unknown>;
+  lastVehicleInfo?: {
+    vehicleNickName?: string;
+    vehicleStatusRpt?: { vehicleStatus?: KiaVehicleStatus; [key: string]: unknown };
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/** An entry of `evc/gts`'s `payload.targetSOClist[]`. */
+export interface KiaChargeTarget {
+  plugType: number;
+  targetSOClevel: number;
+}
+
+/** What every mutation returns. `xid` is the `Xid` RESPONSE header. */
+export interface KiaCommandResult {
+  command: KiaCommandName;
+  path: string;
+  method: 'GET' | 'POST';
+  /** Whether this endpoint was exercised against a live vehicle. */
+  verified: boolean;
+  /** Kia's action id, or `null` when the header was absent. */
+  xid: string | null;
+  /** The raw success envelope. Kia's body carries no result detail. */
+  raw: KiaEnvelope;
+}
+
+// ---------------------------------------------------------------------------
+// Body builders (exported so tool registrars can render an accurate dry-run
+// preview of exactly what would be sent).
+// ---------------------------------------------------------------------------
+
+/**
+ * `cmm/gvi` request body. `drivingActivty` is misspelled **in the API itself**;
+ * correcting it silently drops the field.
+ */
+export function buildVehicleStatusBody(vinKey: string, opts?: { includeClimate?: boolean }): unknown {
+  const climate = opts?.includeClimate === false ? '0' : '1';
+  return {
+    vehicleConfigReq: {
+      airTempRange: climate,
+      maintenance: '1',
+      seatHeatCoolOption: climate,
+      vehicle: '1',
+      vehicleFeature: '0',
+    },
+    vehicleInfoReq: {
+      drivingActivty: '0',
+      dtc: '1',
+      enrollment: '1',
+      functionalCards: '0',
+      location: '1',
+      vehicleStatus: '1',
+      weather: '0',
+    },
+    vinKey: [vinKey],
+  };
+}
+
+/** Options for {@link buildStartClimateBody} / {@link KiaClient.startClimate}. */
+export interface StartClimateOptions {
+  /**
+   * Target temperature in °F (default 70). **Best-effort:** a start requesting
+   * 70 still read back 72, so the car may be reporting its own last-set target.
+   */
+  airTempF?: number;
+  defrost?: boolean;
+  /** Minutes the ignition stays on (default 5). */
+  durationMinutes?: number;
+}
+
+/**
+ * `rems/start` request body. Seat settings are deliberately omitted — Kia
+ * validates seat capability per car and accepts the key being absent.
+ */
+export function buildStartClimateBody(opts: StartClimateOptions = {}): unknown {
+  return {
+    remoteClimate: {
+      airTemp: { unit: 1, value: String(opts.airTempF ?? 70) },
+      airCtrl: true,
+      defrost: opts.defrost ?? false,
+      heatingAccessory: { rearWindow: 0, sideMirror: 0, steeringWheel: 0, steeringWheelStep: 0 },
+      ignitionOnDuration: { unit: 4, value: opts.durationMinutes ?? 5 },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Change detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Keys excluded from before/after comparison at every depth. `syncDate`
+ * advances on EVERY read whether or not anything happened — including it makes
+ * *every* command report success.
+ */
+export const CHANGE_DETECTION_EXCLUDED_KEYS: readonly string[] = ['syncDate'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function collectDiff(before: unknown, after: unknown, path: string, out: string[]): void {
+  if (isRecord(before) && isRecord(after)) {
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (CHANGE_DETECTION_EXCLUDED_KEYS.includes(key)) continue;
+      collectDiff(before[key], after[key], path ? `${path}.${key}` : key, out);
+    }
+    return;
+  }
+  if (Array.isArray(before) && Array.isArray(after) && before.length === after.length) {
+    before.forEach((item, index) => collectDiff(item, after[index], `${path}[${index}]`, out));
+    return;
+  }
+  if (JSON.stringify(before) !== JSON.stringify(after)) out.push(path || '(root)');
+}
+
+/**
+ * Dotted paths of every field that differs between two snapshots, ignoring
+ * {@link CHANGE_DETECTION_EXCLUDED_KEYS}. This diff — not `cmm/gts` — is the
+ * only proof a command took effect.
+ */
+export function diffIgnoringSyncDate(before: unknown, after: unknown): string[] {
+  const out: string[] = [];
+  collectDiff(before, after, '', out);
+  return out;
+}
+
+/** Dig the nested `vehicleStatus` out of a `cmm/gvi` record. */
+export function extractVehicleStatus(info: KiaVehicleInfo | null): KiaVehicleStatus | null {
+  return info?.lastVehicleInfo?.vehicleStatusRpt?.vehicleStatus ?? null;
+}
+
+/** Options for {@link KiaClient.verifyCommand}. */
+export interface VerifyCommandOptions<T> {
+  /**
+   * Snapshot taken BEFORE the command, used for the change diff. Defaults to
+   * the first post-command read.
+   */
+  baseline?: T;
+  /** Give up after this long (default 60s — observed changes land in 30–60s). */
+  timeoutMs?: number;
+  /** Delay between re-reads (default 5s). */
+  intervalMs?: number;
+  /** Injectable for tests. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Injectable clock for tests. */
+  now?: () => number;
+}
+
+/** Outcome of a re-read-and-diff verification. */
+export interface VerifyCommandResult<T> {
+  verified: boolean;
+  /** Number of re-reads performed. */
+  attempts: number;
+  elapsedMs: number;
+  /** The last snapshot read. */
+  snapshot: T;
+  /** Fields that changed vs. the baseline, `syncDate` excluded. */
+  changedFields: string[];
+}
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
+/** Constructor options. Every field is optional so `new KiaClient()` is valid. */
+export interface KiaClientOptions {
+  /** Overrides `KIA_USERNAME`. */
+  username?: string;
+  /** Overrides `KIA_PASSWORD`. */
+  password?: string;
+  /** Pre-bootstrapped remember-me token; skips the session store entirely. */
+  rmtoken?: string;
+  /** Overrides the persisted/`KIA_DEVICE_ID` device uuid. */
+  deviceId?: string;
+  /** Fetch seam for tests. */
+  fetchImpl?: FetchLike;
+  /** Persistence seam — {@link diskSessionIO} by default. */
+  sessionIO?: KiaSessionIO;
+  /** Override the assumed `sid` lifetime. */
+  sidTtlMs?: number;
+}
+
+export class KiaClient {
+  private readonly opts: KiaClientOptions;
+  private readonly sessionIO: KiaSessionIO;
+
+  // Lazily-resolved state. NOTHING is computed in the constructor: the module
+  // singleton is built in Workers global scope, where I/O, randomness and
+  // timers are forbidden.
+  private credentialsResolved = false;
+  private configError: McpToolError | undefined;
+  private credentials: KiaCredentials | undefined;
+  private cachedDeviceId: string | undefined;
+  private cachedRmToken: string | null | undefined;
+  private cachedSids: SidManager | undefined;
+
+  constructor(opts: KiaClientOptions = {}) {
+    this.opts = opts;
+    this.sessionIO = opts.sessionIO ?? diskSessionIO;
+  }
+
+  // -- configuration --------------------------------------------------------
+
+  /**
+   * Resolve credentials once, storing (not throwing) a config error when they
+   * are absent. The stored error is rethrown by {@link requireCredentials} at
+   * request time.
+   */
+  private resolveCredentials(): void {
+    if (this.credentialsResolved) return;
+    this.credentialsResolved = true;
+    const username = this.opts.username ?? readEnvVar('KIA_USERNAME');
+    const password = this.opts.password ?? readEnvVar('KIA_PASSWORD');
+    const missing = [
+      ...(username ? [] : ['KIA_USERNAME']),
+      ...(password ? [] : ['KIA_PASSWORD']),
+    ];
+    if (missing.length > 0) {
+      this.configError = new McpToolError(
+        `kiaaccess-mcp is not configured: ${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not set.`,
+        {
+          hint:
+            'Copy .env.example to .env and fill in your Kia Owners credentials. Double-check them first: ' +
+            'Kia counts failed logins and escalates to reCAPTCHA, which breaks this server permanently.',
+        },
+      );
+      return;
+    }
+    this.credentials = { username: username as string, password: password as string };
+  }
+
+  /** Credentials, or the deferred config error. */
+  private requireCredentials(): KiaCredentials {
+    this.resolveCredentials();
+    if (this.configError) throw this.configError;
+    return this.credentials as KiaCredentials;
+  }
+
+  /** Whether credentials are present, without throwing. */
+  isConfigured(): boolean {
+    this.resolveCredentials();
+    return this.configError === undefined;
+  }
+
+  /** Kia account id (the login email), lowercased. Throws if unconfigured. */
+  private get accountId(): string {
+    return this.requireCredentials().username.trim().toLowerCase();
+  }
+
+  /** Device uuid — resolved (and possibly persisted) on first use, never at construction. */
+  private get deviceId(): string {
+    return (this.cachedDeviceId ??= this.opts.deviceId ?? resolveDeviceId());
+  }
+
+  /** Non-throwing config snapshot for a healthcheck / diagnostics tool. */
+  describeConfig(): { accountId: string | null; deviceId: string; configured: boolean; hasSession: boolean } {
+    const configured = this.isConfigured();
+    return {
+      accountId: configured ? this.accountId : null,
+      deviceId: this.deviceId,
+      configured,
+      hasSession: this.hasSession(),
+    };
+  }
+
+  // -- session --------------------------------------------------------------
+
+  private loadRmToken(): string | null {
+    if (this.cachedRmToken === undefined) {
+      this.cachedRmToken = this.opts.rmtoken ?? this.sessionIO.load(this.accountId)?.rmtoken ?? null;
+    }
+    return this.cachedRmToken;
+  }
+
+  private requireRmToken(): string {
+    const rmtoken = this.loadRmToken();
+    if (!rmtoken) {
+      throw new McpToolError(
+        'No Kia session: this account has never completed the one-time MFA bootstrap on this device.',
+        {
+          hint:
+            'Run the login bootstrap once (start login → send OTP → verify OTP). The resulting remember-me ' +
+            'token is stored locally and re-used indefinitely, so MFA is not needed again.',
+        },
+      );
+    }
+    return rmtoken;
+  }
+
+  /** Whether a remember-me token is available (no MFA bootstrap needed). */
+  hasSession(): boolean {
+    if (!this.isConfigured()) return false;
+    return this.loadRmToken() !== null;
+  }
+
+  /**
+   * The remember-me token, for a caller that must persist it elsewhere (the
+   * hosted connector stores it in the user's encrypted OAuth props).
+   *
+   * **Secret.** Never return this from an MCP tool — it is a full MFA bypass.
+   */
+  exportRmToken(): string | null {
+    if (!this.isConfigured()) return null;
+    return this.loadRmToken();
+  }
+
+  /** Forget the stored session; the next call needs a fresh MFA bootstrap. */
+  forgetSession(): void {
+    if (!this.isConfigured()) return;
+    this.sessionIO.clear(this.accountId);
+    this.cachedRmToken = null;
+    this.cachedSids = undefined;
+  }
+
+  private adoptRmToken(rmtoken: string): void {
+    if (rmtoken === this.cachedRmToken) return;
+    this.cachedRmToken = rmtoken;
+    this.sessionIO.save({
+      accountId: this.accountId,
+      rmtoken,
+      deviceId: this.deviceId,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  /** Single-flight `sid` minting, built on first use. */
+  private get sids(): SidManager {
+    return (this.cachedSids ??= new SidManager({
+      ttlMs: this.opts.sidTtlMs,
+      mint: async () => {
+        const credentials = this.requireCredentials();
+        const rmtoken = this.requireRmToken();
+        const result = await refreshSession(rmtoken, credentials, this.deviceId, { fetchImpl: this.opts.fetchImpl });
+        this.adoptRmToken(result.rmtoken);
+        return result.sid;
+      },
+    }));
+  }
+
+  // -- MFA bootstrap --------------------------------------------------------
+
+  /** Step 1 of the one-time bootstrap. Returns the `otpKey` and `xid`. */
+  beginLogin(): Promise<StartLoginResult> {
+    return startLogin(this.requireCredentials(), this.deviceId, { fetchImpl: this.opts.fetchImpl });
+  }
+
+  /** Step 2 — deliver the passcode by SMS or email. */
+  sendLoginOtp(args: { otpKey: string; xid: string; notifyType: OtpNotifyType }): Promise<SendOtpResult> {
+    this.requireCredentials();
+    return sendOtp(args, this.deviceId, { fetchImpl: this.opts.fetchImpl });
+  }
+
+  /**
+   * Step 3 — verify the passcode and persist the resulting remember-me token.
+   *
+   * Deliberately returns NO secret: the `sid` and `rmtoken` stay inside the
+   * client so a tool cannot echo them into a transcript.
+   */
+  async completeLogin(args: { otpKey: string; xid: string; otp: string }): Promise<{
+    accountId: string;
+    deviceId: string;
+    persisted: boolean;
+  }> {
+    this.requireCredentials();
+    const { rmtoken } = await verifyOtp(args, this.deviceId, { fetchImpl: this.opts.fetchImpl });
+    this.adoptRmToken(rmtoken);
+    // Drop any SidManager built against the previous token.
+    this.cachedSids = undefined;
+    return { accountId: this.accountId, deviceId: this.deviceId, persisted: true };
+  }
+
+  // -- transport ------------------------------------------------------------
+
+  /**
+   * The single authenticated round-trip: fresh headers (including the mandatory
+   * `date`), the `sid` from {@link SidManager}, one reactive re-mint + replay if
+   * the body reports an expired session, and the body-level success check —
+   * `status.statusCode === 0`, never the HTTP status.
+   */
+  private async dispatch<T>(
+    path: string,
+    opts: { method: 'GET' | 'POST'; body?: unknown; vinKey?: string },
+  ): Promise<{ envelope: KiaEnvelope<T>; xid: string | null }> {
+    // Surface the deferred config error before anything else happens.
+    this.requireCredentials();
+
+    const raw = await this.sids.withSid(
+      (sid) =>
+        sendKiaRequest(path, {
+          method: opts.method,
+          headers: buildHeaders(this.deviceId, { sid, vinkey: opts.vinKey }),
+          body: opts.body,
+          fetchImpl: this.opts.fetchImpl,
+        }),
+      (response) => isSessionExpiredStatus(statusOf(response.body)),
+    );
+
+    return { envelope: assertKiaSuccess<T>(raw.body, path), xid: raw.headers.get('xid') };
+  }
+
+  /** Every READ goes through here. */
+  private async request<T>(
+    path: string,
+    opts: { method: 'GET' | 'POST'; body?: unknown; vinKey?: string },
+  ): Promise<KiaEnvelope<T>> {
+    return (await this.dispatch<T>(path, opts)).envelope;
+  }
+
+  /**
+   * Every MUTATION goes through here.
+   *
+   * Note what is absent: no `cmm/gts` poll. That endpoint returns global flags
+   * that never change per action, so gating a command's result on it waits
+   * forever. Callers prove the effect with {@link verifyCommand} instead.
+   */
+  private async command(name: KiaCommandName, opts: { vinKey: string; body?: unknown }): Promise<KiaCommandResult> {
+    const spec = COMMAND_SPECS[name];
+    const { envelope, xid } = await this.dispatch(spec.path, {
+      method: spec.method,
+      body: opts.body,
+      vinKey: opts.vinKey,
+    });
+    return { command: name, path: spec.path, method: spec.method, verified: spec.verified, xid, raw: envelope };
+  }
+
+  // -- reads ----------------------------------------------------------------
+
+  /** `ownr/gvl` — the enrolled vehicles. `vehicleKey` is the `vinkey`. */
+  async listVehicles(): Promise<KiaVehicleSummary[]> {
+    const envelope = await this.request<{ vehicleSummary?: KiaVehicleSummary[] }>(ENDPOINTS.vehicleList, {
+      method: 'GET',
+    });
+    return envelope.payload?.vehicleSummary ?? [];
+  }
+
+  /**
+   * `cmm/gvi` — the cached vehicle status. Requested with the climate-bearing
+   * config flags by default; without them the whole `climate` object is absent.
+   */
+  async getVehicleStatus(vinKey: string, opts?: { includeClimate?: boolean }): Promise<KiaVehicleInfo | null> {
+    const envelope = await this.request<{ vehicleInfoList?: KiaVehicleInfo[] }>(ENDPOINTS.vehicleStatus, {
+      method: 'POST',
+      body: buildVehicleStatusBody(vinKey, opts),
+      vinKey,
+    });
+    return envelope.payload?.vehicleInfoList?.[0] ?? null;
+  }
+
+  /** `rems/rvs` — wake the telematics unit for a fresh (slower) read. */
+  async forceVehicleRefresh(vinKey: string): Promise<KiaEnvelope> {
+    return this.request(ENDPOINTS.forceRefresh, { method: 'POST', body: { requestType: 0 }, vinKey });
+  }
+
+  /** `evc/gts` — the per-plug-type target state of charge. */
+  async getChargeTargets(vinKey: string): Promise<KiaChargeTarget[]> {
+    const envelope = await this.request<{ targetSOClist?: KiaChargeTarget[] }>(ENDPOINTS.chargeTargets, {
+      method: 'GET',
+      vinKey,
+    });
+    return envelope.payload?.targetSOClist ?? [];
+  }
+
+  // -- commands (verified) --------------------------------------------------
+
+  /** Lock the doors. Proven by `doorLock` going `false` → `true`. */
+  lockDoors(vinKey: string): Promise<KiaCommandResult> {
+    return this.command('lock', { vinKey });
+  }
+
+  /** Unlock the doors. Proven by `doorLock` going `true` → `false`. */
+  unlockDoors(vinKey: string): Promise<KiaCommandResult> {
+    return this.command('unlock', { vinKey });
+  }
+
+  /** Start remote climate. Proven by `climate.airCtrl` and `ign3` going true. */
+  startClimate(vinKey: string, opts: StartClimateOptions = {}): Promise<KiaCommandResult> {
+    return this.command('start', { vinKey, body: buildStartClimateBody(opts) });
+  }
+
+  /** Stop remote climate. Proven by `climate.airCtrl` and `ign3` going false. */
+  stopClimate(vinKey: string): Promise<KiaCommandResult> {
+    return this.command('stop', { vinKey });
+  }
+
+  // -- commands (UNVERIFIED — never exercised against a live vehicle) --------
+
+  /** **UNVERIFIED.** Start charging to `chargeRatio` percent. */
+  startCharge(vinKey: string, chargeRatio = 100): Promise<KiaCommandResult> {
+    return this.command('charge', { vinKey, body: { chargeRatio } });
+  }
+
+  /** **UNVERIFIED.** Cancel charging. */
+  cancelCharge(vinKey: string): Promise<KiaCommandResult> {
+    return this.command('cancelCharge', { vinKey });
+  }
+
+  /** **UNVERIFIED.** Set the per-plug-type target state of charge. */
+  setChargeTargets(vinKey: string, targetSOClist: KiaChargeTarget[]): Promise<KiaCommandResult> {
+    return this.command('setChargeTargets', { vinKey, body: { targetSOClist } });
+  }
+
+  // -- verification ---------------------------------------------------------
+
+  /**
+   * Prove a command took effect by re-reading and diffing — the ONLY reliable
+   * proof, since `cmm/gts` never reports per-action completion.
+   *
+   * `syncDate` is excluded from the diff at every depth: it advances on every
+   * read, so including it makes every command falsely report success.
+   */
+  async verifyCommand<T>(
+    readFn: () => Promise<T>,
+    predicate: (snapshot: T) => boolean,
+    opts: VerifyCommandOptions<T> = {},
+  ): Promise<VerifyCommandResult<T>> {
+    const timeoutMs = opts.timeoutMs ?? 60_000;
+    const intervalMs = opts.intervalMs ?? 5_000;
+    const sleep = opts.sleep ?? defaultSleep;
+    const now = opts.now ?? Date.now;
+    const started = now();
+
+    let snapshot = await readFn();
+    let attempts = 1;
+    const baseline = opts.baseline ?? snapshot;
+    let verified = predicate(snapshot);
+
+    while (!verified && now() - started + intervalMs <= timeoutMs) {
+      await sleep(intervalMs);
+      snapshot = await readFn();
+      attempts += 1;
+      verified = predicate(snapshot);
+    }
+
+    return {
+      verified,
+      attempts,
+      elapsedMs: now() - started,
+      snapshot,
+      changedFields: diffIgnoringSyncDate(baseline, snapshot),
+    };
+  }
+}
+
+/** Read the `status` block off an unvalidated body, defaulting to "success". */
+function statusOf(body: unknown): KiaStatus {
+  const status = (body as { status?: KiaStatus } | null | undefined)?.status;
+  return typeof status?.statusCode === 'number' ? status : { statusCode: 0 };
+}
+
+/**
+ * Module-level singleton for the stdio server. Construction is side-effect-free
+ * (see the class docs), so importing this is safe in any runtime.
+ */
+export const client = new KiaClient();
