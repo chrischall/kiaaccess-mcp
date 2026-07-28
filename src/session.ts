@@ -157,6 +157,7 @@ export interface SidManagerOptions {
 export class SidManager {
   private readonly tokens: TokenManager;
   private readonly ttlMs: number;
+  private mints = 0;
 
   constructor(opts: SidManagerOptions) {
     this.ttlMs = opts.ttlMs ?? SID_TTL_MS;
@@ -165,12 +166,25 @@ export class SidManager {
       // on first use rather than at construction.
       initial: { accessToken: '', refreshToken: SID_REFRESH_SENTINEL, expiresAt: 0 },
       skewMs: opts.skewMs ?? SID_REFRESH_SKEW_MS,
-      refresh: async () => ({
-        accessToken: await opts.mint(),
-        refreshToken: SID_REFRESH_SENTINEL,
-        expiresAt: Date.now() + this.ttlMs,
-      }),
+      refresh: async () => {
+        const accessToken = await opts.mint();
+        this.mints += 1;
+        return { accessToken, refreshToken: SID_REFRESH_SENTINEL, expiresAt: Date.now() + this.ttlMs };
+      },
     });
+  }
+
+  /**
+   * How many `sid`s this manager has minted — a monotonic id for the CURRENT
+   * Kia session.
+   *
+   * Exposed because minting a `sid` also rotates every `vehicleKey` on the
+   * account, so anything derived from the old session (see `KiaClient`'s vinkey
+   * remap) has to be discarded when this changes. The `sid` itself is
+   * deliberately not readable; a counter leaks nothing.
+   */
+  get generation(): number {
+    return this.mints;
   }
 
   /**

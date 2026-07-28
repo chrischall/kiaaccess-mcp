@@ -284,6 +284,60 @@ describe('confirm gate', () => {
     expectNoCalls(spies);
     await harness.close();
   });
+
+  /**
+   * Regression: `temperature` is the only argument whose JSON Schema is a
+   * number|string union, and hosts filling it were observed to emit the number
+   * as a STRING ("72"). That matched neither union branch, so every plain
+   * integer failed with a bare "Invalid input at temperature" while the LOW/HIGH
+   * sentinels — already strings — worked fine.
+   */
+  it('accepts a string-encoded integer and normalises it to the numeric wire value', async () => {
+    const { client, spies } = makeClient();
+    const harness = await harnessFor(client);
+
+    for (const sent of ['72', '62', '82']) {
+      const preview = parseToolResult<{ willSend: { remoteClimate: { airTemp: { value: string } } }; action: string }>(
+        await harness.callTool('kia_start_climate', { vinKey: VIN_KEY, temperature: sent }),
+      );
+      expect(preview.willSend.remoteClimate.airTemp.value).toBe(sent);
+      // The echoed action must show the number, not a quoted string.
+      expect(preview.action).toContain(`${sent}°F`);
+    }
+
+    expectNoCalls(spies);
+    await harness.close();
+  });
+
+  it('still enforces the 62-82 range on a string-encoded integer', async () => {
+    const { client, spies } = makeClient();
+    const harness = await harnessFor(client);
+    for (const sent of ['55', '99', '72.5', 'warm', '']) {
+      const result = await harness.callTool('kia_start_climate', { vinKey: VIN_KEY, temperature: sent });
+      expect(result.isError, `temperature ${JSON.stringify(sent)} must be rejected`).toBe(true);
+    }
+    expectNoCalls(spies);
+    await harness.close();
+  });
+
+  it('advertises the string form in the published input schema', async () => {
+    const { client } = makeClient();
+    const harness = await harnessFor(client);
+    // `harness.listTools()` is name-only; the underlying client returns the
+    // full advertised definition, which is what a host actually reads.
+    const { tools } = await harness.client.listTools();
+    const tool = tools.find((t) => t.name === 'kia_start_climate');
+    const temperature = (tool?.inputSchema as { properties?: Record<string, { anyOf?: unknown[] }> } | undefined)
+      ?.properties?.temperature;
+    // Assert the branch this fix ADDED. The pre-fix two-branch union already
+    // published a `{"type":"string","enum":["LOW","HIGH"]}` entry, so a looser
+    // "contains a string somewhere" check passes against the broken schema and
+    // cannot fail on the regression it documents. Naming the pattern also pins
+    // down which side of the Zod pipe is published (input, not output) — the
+    // input side is the one a host reads to decide how to encode the value.
+    expect(temperature?.anyOf).toContainEqual(expect.objectContaining({ type: 'string', pattern: '^\\d+$' }));
+    await harness.close();
+  });
 });
 
 describe('confirmed execution', () => {

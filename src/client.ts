@@ -40,9 +40,11 @@ import {
   type FetchLike,
   type KiaCommandName,
   type KiaEnvelope,
+  type KiaRawResponse,
   type KiaStatus,
   assertKiaSuccess,
   buildHeaders,
+  isInvalidVehicleForSessionStatus,
   isSessionExpiredStatus,
   sendKiaRequest,
 } from './protocol.js';
@@ -297,6 +299,21 @@ export interface KiaClientOptions {
   sidTtlMs?: number;
 }
 
+/** One outbound Kia call, as {@link KiaClient.dispatch} takes it. */
+interface KiaRequestOptions {
+  method: 'GET' | 'POST';
+  body?: unknown;
+  /** Sent as the `vinkey` header; also enables the rotated-key recovery. */
+  vinKey?: string;
+  /**
+   * Builds the body from the key actually being sent, for an endpoint that
+   * carries the key IN the body as well as the header — `cmm/gvi` is the only
+   * one. Such an endpoint supplies this INSTEAD of `body`, so a remapped header
+   * can never end up over a body naming a different vehicle.
+   */
+  bodyForVinKey?: (vinKey: string) => unknown;
+}
+
 export class KiaClient {
   private readonly opts: KiaClientOptions;
   private readonly sessionIO: KiaSessionIO;
@@ -310,6 +327,13 @@ export class KiaClient {
   private cachedDeviceId: string | undefined;
   private cachedRmToken: string | null | undefined;
   private cachedSids: SidManager | undefined;
+
+  // Session-scoped vinkey state — see `resolveSessionVinKey`. `vinByVehicleKey`
+  // is NOT session-scoped on purpose: it is how a key from a dead session is
+  // traced back to the car it named, so it must outlive that session.
+  private readonly vinByVehicleKey = new Map<string, string>();
+  private vinKeyRemap = new Map<string, string>();
+  private vinKeyRemapGeneration = -1;
 
   constructor(opts: KiaClientOptions = {}) {
     this.opts = opts;
@@ -489,19 +513,13 @@ export class KiaClient {
   // -- transport ------------------------------------------------------------
 
   /**
-   * The single authenticated round-trip: fresh headers (including the mandatory
-   * `date`), the `sid` from {@link SidManager}, one reactive re-mint + replay if
-   * the body reports an expired session, and the body-level success check —
-   * `status.statusCode === 0`, never the HTTP status.
+   * One authenticated round-trip: fresh headers (including the mandatory
+   * `date`), the `sid` from {@link SidManager}, and one reactive re-mint +
+   * replay if the body reports an expired session. Success is NOT asserted here
+   * — {@link dispatch} needs to inspect a failing body first.
    */
-  private async dispatch<T>(
-    path: string,
-    opts: { method: 'GET' | 'POST'; body?: unknown; vinKey?: string },
-  ): Promise<{ envelope: KiaEnvelope<T>; xid: string | null }> {
-    // Surface the deferred config error before anything else happens.
-    this.requireCredentials();
-
-    const raw = await this.sids.withSid(
+  private send(path: string, opts: KiaRequestOptions): Promise<KiaRawResponse> {
+    return this.sids.withSid(
       (sid) =>
         sendKiaRequest(path, {
           method: opts.method,
@@ -511,15 +529,66 @@ export class KiaClient {
         }),
       (response) => isSessionExpiredStatus(statusOf(response.body)),
     );
+  }
+
+  /**
+   * The authenticated round-trip plus the two recoveries, then the body-level
+   * success check (`status.statusCode === 0`, never the HTTP status).
+   *
+   * The second recovery is the vinkey one. Kia rotates every `vehicleKey`
+   * whenever a `sid` is minted, so a key the caller read from `ownr/gvl` under
+   * an earlier session comes back `Invalid vehicle for current session`
+   * (errorCode 1005). We re-resolve the key against a fresh `ownr/gvl` under the
+   * CURRENT session and replay exactly once.
+   *
+   * What must NOT happen here is a re-authentication: that mints a new session,
+   * which rotates the keys again, so the "fix" would destroy the very key it
+   * just fetched. That was the original bug — 1005's message contains the word
+   * "session", so the expiry heuristic above swallowed it and every attempt made
+   * the account's `vehicleKey` change again. `isSessionExpiredStatus` now
+   * excludes 1005 explicitly, and this is what handles it instead.
+   */
+  private async dispatch<T>(
+    path: string,
+    opts: KiaRequestOptions,
+  ): Promise<{ envelope: KiaEnvelope<T>; xid: string | null }> {
+    // Surface the deferred config error before anything else happens.
+    this.requireCredentials();
+
+    const raw =
+      opts.vinKey === undefined ? await this.send(path, opts) : await this.sendVehicleScoped(path, opts, opts.vinKey);
 
     return { envelope: assertKiaSuccess<T>(raw.body, path), xid: raw.headers.get('xid') };
   }
 
+  /**
+   * A call carrying a `vinkey`, with the rotated-key recovery described on
+   * {@link dispatch}.
+   *
+   * The body is derived from whichever key is actually being sent, at BOTH the
+   * initial send and the replay. `cmm/gvi` repeats the key inside its body, and
+   * a request whose header and body name different vehicles is exactly the
+   * failure this recovery exists to prevent — so there is deliberately no path
+   * that sends a caller-built body alongside a key the caller did not supply.
+   */
+  private async sendVehicleScoped(path: string, opts: KiaRequestOptions, requested: string): Promise<KiaRawResponse> {
+    const bodyFor = (key: string): unknown => (opts.bodyForVinKey === undefined ? opts.body : opts.bodyForVinKey(key));
+
+    const vinKey = this.currentVinKey(requested);
+    const raw = await this.send(path, { ...opts, vinKey, body: bodyFor(vinKey) });
+    if (!isInvalidVehicleForSessionStatus(statusOf(raw.body))) return raw;
+
+    const fresh = await this.resolveSessionVinKey(vinKey);
+    if (fresh === null) return raw;
+
+    // Cached under the CALLER's key rather than the one that was rejected, so
+    // their key keeps resolving in a single hop instead of growing a chain.
+    this.rememberRemap(requested, fresh);
+    return this.send(path, { ...opts, vinKey: fresh, body: bodyFor(fresh) });
+  }
+
   /** Every READ goes through here. */
-  private async request<T>(
-    path: string,
-    opts: { method: 'GET' | 'POST'; body?: unknown; vinKey?: string },
-  ): Promise<KiaEnvelope<T>> {
+  private async request<T>(path: string, opts: KiaRequestOptions): Promise<KiaEnvelope<T>> {
     return (await this.dispatch<T>(path, opts)).envelope;
   }
 
@@ -540,14 +609,92 @@ export class KiaClient {
     return { command: name, path: spec.path, method: spec.method, verified: spec.verified, xid, raw: envelope };
   }
 
+  // -- vinkey rotation ------------------------------------------------------
+
+  /**
+   * Note the `vehicleKey` → `vin` pairing of every vehicle a list read returned.
+   *
+   * The VIN is the only stable identity Kia exposes: `vehicleKey` rotates with
+   * the session, so this map is what lets a key from a dead session be traced to
+   * the car it named and re-pointed at that car's current key.
+   */
+  private rememberVehicleKeys(vehicles: readonly KiaVehicleSummary[]): void {
+    for (const vehicle of vehicles) {
+      if (vehicle.vehicleKey && vehicle.vin) this.vinByVehicleKey.set(vehicle.vehicleKey, vehicle.vin);
+    }
+  }
+
+  /**
+   * Drop the remap if the `sid` has changed since it was learned.
+   *
+   * That is exactly when Kia rotates the keys, so a remap from the previous
+   * session points at a key which is now just as dead as the one it replaced.
+   */
+  private syncRemapGeneration(): void {
+    const generation = this.sids.generation;
+    if (generation === this.vinKeyRemapGeneration) return;
+    this.vinKeyRemap = new Map();
+    this.vinKeyRemapGeneration = generation;
+  }
+
+  /** The key to actually send for a caller-supplied one, after any remap. */
+  private currentVinKey(vinKey: string): string {
+    this.syncRemapGeneration();
+    return this.vinKeyRemap.get(vinKey) ?? vinKey;
+  }
+
+  /** Cache a resolved key for the rest of this session. */
+  private rememberRemap(requested: string, resolved: string): void {
+    // The list read that produced `resolved` may itself have re-minted the sid,
+    // so re-check the generation before caching against it.
+    this.syncRemapGeneration();
+    this.vinKeyRemap.set(requested, resolved);
+  }
+
+  /**
+   * Re-resolve a rejected `vinkey` against a fresh `ownr/gvl`, or `null` when no
+   * unambiguous answer exists (in which case the caller lets Kia's own error
+   * stand rather than guessing at which car was meant).
+   *
+   * Pure lookup — caching is the caller's business, because the useful cache key
+   * is the one the CALLER supplied, not the (possibly already remapped) one that
+   * was rejected here.
+   *
+   * The list read runs on the current `sid` and carries no `vinkey` of its own,
+   * so it cannot re-enter this path.
+   */
+  private async resolveSessionVinKey(rejected: string): Promise<string | null> {
+    const vehicles = await this.listVehicles();
+
+    // Still listed: the key is current, so 1005 means something else entirely
+    // and a replay would just fail the same way.
+    if (vehicles.some((vehicle) => vehicle.vehicleKey === rejected)) return null;
+
+    const vin = this.vinByVehicleKey.get(rejected);
+    const match = vin === undefined ? undefined : vehicles.find((vehicle) => vehicle.vin === vin);
+    // With exactly one enrolled car there is nothing to disambiguate, which
+    // covers a key supplied from outside this process (a transcript, a restart)
+    // that was never seen in a list read here.
+    return match?.vehicleKey ?? (vehicles.length === 1 ? vehicles[0].vehicleKey : null);
+  }
+
   // -- reads ----------------------------------------------------------------
 
-  /** `ownr/gvl` — the enrolled vehicles. `vehicleKey` is the `vinkey`. */
+  /**
+   * `ownr/gvl` — the enrolled vehicles. `vehicleKey` is the `vinkey`.
+   *
+   * **The returned `vehicleKey`s are only valid for the current session.** Kia
+   * rotates them whenever a `sid` is minted; {@link rememberVehicleKeys} records
+   * the VIN behind each one so a key that outlives its session can still be
+   * re-pointed at the right car instead of failing.
+   */
   async listVehicles(): Promise<KiaVehicleSummary[]> {
     const envelope = await this.request<{ vehicleSummary?: KiaVehicleSummary[] }>(ENDPOINTS.vehicleList, {
       method: 'GET',
     });
-    return envelope.payload?.vehicleSummary ?? [];
+    const vehicles = envelope.payload?.vehicleSummary ?? [];
+    this.rememberVehicleKeys(vehicles);
+    return vehicles;
   }
 
   /**
@@ -557,7 +704,11 @@ export class KiaClient {
   async getVehicleStatus(vinKey: string, opts?: { includeClimate?: boolean }): Promise<KiaVehicleInfo | null> {
     const envelope = await this.request<{ vehicleInfoList?: KiaVehicleInfo[] }>(ENDPOINTS.vehicleStatus, {
       method: 'POST',
-      body: buildVehicleStatusBody(vinKey, opts),
+      // This endpoint repeats the key inside its body, so the body is built from
+      // whichever key is actually sent rather than passed in ready-made. There
+      // is deliberately no `body` here to fall out of sync with the header once
+      // a remap is in play (see KiaRequestOptions.bodyForVinKey).
+      bodyForVinKey: (key) => buildVehicleStatusBody(key, opts),
       vinKey,
     });
     return envelope.payload?.vehicleInfoList?.[0] ?? null;

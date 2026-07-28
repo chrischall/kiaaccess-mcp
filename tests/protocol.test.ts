@@ -4,6 +4,7 @@ import {
   COMMAND_SPECS,
   KIA_ERROR_INVALID_CREDENTIALS,
   KIA_ERROR_INVALID_EMAIL,
+  KIA_ERROR_INVALID_VEHICLE_FOR_SESSION,
   KIA_ERROR_MISSING_HEADER_DATA,
   KIA_STATIC_HEADERS,
   KiaApiError,
@@ -11,6 +12,7 @@ import {
   buildHeaders,
   gmtOffsetHours,
   isCredentialRejection,
+  isInvalidVehicleForSessionStatus,
   isSessionExpiredStatus,
   rfc1123,
 } from '../src/protocol.js';
@@ -172,6 +174,46 @@ describe('isSessionExpiredStatus', () => {
   it('does not match unrelated failures or a missing message', () => {
     expect(isSessionExpiredStatus({ statusCode: 1, errorCode: 9200, errorMessage: 'Missing mandatory data in header' })).toBe(false);
     expect(isSessionExpiredStatus({ statusCode: 1 })).toBe(false);
+  });
+
+  /**
+   * Regression: this message contains the word "session", so the substring
+   * heuristic classified a rotated `vinkey` as a dead session and re-ran
+   * `prof/authUser` — which mints a NEW session and rotates every vehicle key
+   * again. Each attempt therefore invalidated the key the caller had just
+   * fetched, and no retry could ever succeed.
+   */
+  it('does not match "Invalid vehicle for current session" — that is a stale vinkey, not a dead session', () => {
+    expect(
+      isSessionExpiredStatus({
+        statusCode: 1,
+        errorType: 1,
+        errorCode: KIA_ERROR_INVALID_VEHICLE_FOR_SESSION,
+        errorMessage: 'Invalid vehicle for current session',
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('isInvalidVehicleForSessionStatus', () => {
+  it('matches Kia errorCode 1005', () => {
+    expect(
+      isInvalidVehicleForSessionStatus({
+        statusCode: 1,
+        errorType: 1,
+        errorCode: KIA_ERROR_INVALID_VEHICLE_FOR_SESSION,
+        errorMessage: 'Invalid vehicle for current session',
+      }),
+    ).toBe(true);
+  });
+
+  it('keys off the errorCode, not the message', () => {
+    // Same words, different code — not the rotated-key condition.
+    expect(isInvalidVehicleForSessionStatus({ statusCode: 1, errorCode: 1, errorMessage: 'Invalid vehicle for current session' })).toBe(
+      false,
+    );
+    expect(isInvalidVehicleForSessionStatus({ statusCode: 0, errorCode: KIA_ERROR_INVALID_VEHICLE_FOR_SESSION })).toBe(false);
+    expect(isInvalidVehicleForSessionStatus({ statusCode: 1 })).toBe(false);
   });
 });
 

@@ -13,6 +13,9 @@ tests/
 *.test.ts
 *.spec.ts
 
+# Manual diagnostics — developer-only, and they talk to the live Kia API
+scripts/
+
 # tsc emits one .js per .ts alongside the bundle — those aren't referenced
 dist/*
 !dist/bundle.js

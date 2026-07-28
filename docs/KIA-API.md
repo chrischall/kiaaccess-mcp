@@ -126,12 +126,33 @@ persist `rmtoken` and mint sids from it indefinitely.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `vehicleKey` | string | the `vinkey` for all vehicle-scoped calls |
+| `vehicleKey` | string | the `vinkey` for all vehicle-scoped calls — **session-scoped, see below** |
 | `vin` | string | |
 | `nickName`, `modelName`, `modelYear`, `trim`, `colorName` | string | |
 | `mileage` | string | |
 | `fuelType` | number | EV detection |
 | `telematicsUnit`, `enrollmentStatus`, `generation` | number | |
+
+> **`vehicleKey` is scoped to the session, not to the car.** Minting a `sid`
+> (§4) rotates every key on the account, so a `vehicleKey` read under an earlier
+> session is rejected by every vehicle-scoped endpoint with:
+>
+> ```json
+> {"status":{"statusCode":1,"errorType":1,"errorCode":1005,
+>            "errorMessage":"Invalid vehicle for current session"}}
+> ```
+>
+> The **VIN** is the only stable identity Kia exposes here. To recover, re-read
+> `ownr/gvl` under the current session and match on `vin` to find the key's
+> current value.
+>
+> **Do not treat 1005 as an expired session.** Its message contains the word
+> "session", which is exactly the trap: re-running `prof/authUser` mints a *new*
+> session and rotates the keys **again**, so the retry destroys the key it just
+> fetched. This is self-sustaining — once a client starts doing it, a
+> freshly-read key fails identically to a stale one and the account's
+> `vehicleKey` appears to change on its own between calls. Key the check off
+> `errorCode === 1005`, never off the message.
 
 ### `POST cmm/gvi` — cached vehicle status
 
@@ -256,6 +277,13 @@ would always report failure.
 > `"70"`. The reported value may be the car's own last-set target rather than
 > the remote request, or the temperature may not apply the way the body implies.
 > Treat the temperature argument as best-effort until verified.
+
+`airTemp.value` is a **string** on the wire, and its domain is wider than a
+number: the `LOW`/`HIGH` sentinels sit outside the 62–82°F range. That makes the
+MCP tool's `temperature` argument the server's only `number | string` union —
+and hosts filling it have been seen to quote the number (`"72"`), which matched
+neither branch and rejected every plain integer with "Invalid input at
+temperature". The schema accepts the quoted form and normalises it.
 
 The `climate`/`heatVentSeat` fields only appear when `cmm/gvi` is called with
 `vehicleConfigReq.airTempRange: "1"` and `seatHeatCoolOption: "1"`; with those
