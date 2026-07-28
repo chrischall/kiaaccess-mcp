@@ -130,7 +130,15 @@ describe('kiaAuth.login — step 1 (no code yet)', () => {
       { body: { status: OK, payload: { message: 'OTP sent successfully', phone: '(***) ***-6609' } } },
     ]);
 
-    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/code/i);
+    // The rejection is a PROMPT, so it carries no message — a banner would
+    // report a failure that did not happen. Everything the user needs is in the
+    // hint rendered beside the newly-revealed field.
+    const thrown = await kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      revealFields?: string[]; fieldHints?: Record<string, string>;
+    };
+    expect(thrown.message).toBe('');
+    expect(thrown.revealFields).toEqual(['otp']);
+    expect(thrown.fieldHints?.otp).toMatch(/code/i);
 
     expect(calls[0].url).toContain(ENDPOINTS.authUser);
     expect(calls[1].url).toContain(ENDPOINTS.sendOtp);
@@ -212,13 +220,16 @@ describe('kiaAuth.login — step 1 (no code yet)', () => {
     expect(err.fieldHints?.otp).toContain('6609');
   });
 
-  it('surfaces the masked destination so the user knows where to look', async () => {
+  it('surfaces the masked destination in the hint, where it stays while typing', async () => {
     const kv = stubKv();
     stubGlobalFetch([
       { headers: { xid: 'fake-xid' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
       { body: { status: OK, payload: { phone: '(***) ***-6609' } } },
     ]);
-    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/6609/);
+    const thrown = await kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      fieldHints?: Record<string, string>;
+    };
+    expect(thrown.fieldHints?.otp).toContain('(***) ***-6609');
   });
 
   it('still names a destination when Kia returns no masked phone', async () => {
@@ -229,7 +240,10 @@ describe('kiaAuth.login — step 1 (no code yet)', () => {
       { headers: { xid: 'x' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
       { body: { status: OK, payload: {} } },
     ]);
-    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/your phone/i);
+    const thrown = await kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      fieldHints?: Record<string, string>;
+    };
+    expect(thrown.fieldHints?.otp).toMatch(/your phone/i);
   });
 
   it('refuses a login with no email or no password before touching the network', async () => {
