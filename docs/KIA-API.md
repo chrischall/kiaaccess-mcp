@@ -289,6 +289,43 @@ The `climate`/`heatVentSeat` fields only appear when `cmm/gvi` is called with
 `vehicleConfigReq.airTempRange: "1"` and `seatHeatCoolOption: "1"`; with those
 at `"0"` the whole `climate` object is absent.
 
+### Seat heat/vent — reported, but the encoding is UNVERIFIED
+
+`climate.heatVentSeat` is keyed by seat position (`driverSeat`,
+`passengerSeat`, …), each `{ heatVentType, heatVentLevel }`. Exactly **one**
+sample has been observed — `{ heatVentType: 0, heatVentLevel: 1 }`, on a car
+whose seats were idle — which identifies neither the "off" value nor which
+`heatVentType` is heating rather than ventilation. `kia_vehicle_status`
+therefore reports the raw numbers and refuses to render them as words.
+
+To pin the encoding down, set each seat to a known state from the car's own app
+and re-read: vary one seat at a time so the position keys stay unambiguous.
+
+> **Absent ≠ "this car has no heated seats."** That is a *capability* question,
+> and capability is not in this block.
+
+### Feature/capability detection — NOT requested by this server
+
+`buildVehicleStatusBody` sends `vehicleConfigReq.vehicleFeature: "0"`, so
+whatever Kia reports there never reaches this client. The captured web-portal
+traffic asks for it, alongside a key this server does not send at all:
+
+```json
+"vehicleConfigReq": { "vehicle": "1", "maintenance": "1", "vehicleFeature": "1",
+                      "airTempRange": "0", "seatHeatCoolOption": "0",
+                      "dsAndUbiEligibilityInfo": "1" }
+```
+
+and the portal's own proxy URLs confirm `vehicleFeature/1` is used together with
+`airTempRange/1` and `seatHeatCoolOption/1`, so the combination is accepted.
+
+**The response shape is unknown** — the portal capture recorded request headers
+and bodies but no response bodies (0 of 1017 entries), so nothing here should be
+parsed on the strength of a guess. Flipping the flag to `"1"` and dumping one
+real response is the next step; it is the prerequisite for offering seat
+heating/ventilation as a *command*, since `rems/start` deliberately omits
+`heatVentSeat` today precisely because Kia validates seat capability per car.
+
 ### Charging — VERIFIED (2026-07-28, against a plugged-in EV9)
 
 | Endpoint | Method | Body | Proven by | Observed |

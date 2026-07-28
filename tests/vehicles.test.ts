@@ -295,6 +295,92 @@ describe('kia_vehicle_status', () => {
     expect(data.syncDate).toEqual({ utc: '20260727190000', offset: -4 });
   });
 
+  /**
+   * `heatVentSeat` arrives on every climate-bearing read (it needs the same
+   * `seatHeatCoolOption: "1"` flag the rest of the block does) but was dropped
+   * by the projection, so it was reachable only through `include_raw`.
+   */
+  it('surfaces the per-seat heat/vent block that already arrives with the climate read', async () => {
+    stub.getVehicleStatus.mockResolvedValue(
+      infoFixture({
+        vehicleStatus: {
+          doorLock: true,
+          climate: {
+            airCtrl: false,
+            heatVentSeat: {
+              driverSeat: { heatVentType: 0, heatVentLevel: 1 },
+              passengerSeat: { heatVentType: 2, heatVentLevel: 3 },
+            },
+          },
+        },
+      }),
+    );
+
+    const data = parseToolResult<{
+      climate: { seats: { present: boolean; positions: Record<string, unknown>; note: string } };
+    }>(await harness.callTool('kia_vehicle_status', { vehicle_key: KEY }));
+
+    expect(data.climate.seats.present).toBe(true);
+    expect(data.climate.seats.positions).toEqual({
+      driverSeat: { heatVentType: 0, heatVentLevel: 1 },
+      passengerSeat: { heatVentType: 2, heatVentLevel: 3 },
+    });
+  });
+
+  /**
+   * The numbers are passed through untranslated on purpose. docs/KIA-API.md
+   * records only one observed sample (`{heatVentType: 0, heatVentLevel: 1}`),
+   * which pins down neither which value means "off" nor which means "cooling" —
+   * so rendering "ventilating on level 3" would be an invention, and about a
+   * physical comfort feature the user would then act on.
+   */
+  it('does not invent a meaning for the heatVentType / heatVentLevel encoding', async () => {
+    stub.getVehicleStatus.mockResolvedValue(
+      infoFixture({
+        vehicleStatus: {
+          climate: { airCtrl: false, heatVentSeat: { driverSeat: { heatVentType: 2, heatVentLevel: 3 } } },
+        },
+      }),
+    );
+
+    const payload = parseToolResult<{ climate: { seats: { note: string } } }>(
+      await harness.callTool('kia_vehicle_status', { vehicle_key: KEY }),
+    );
+
+    expect(payload.climate.seats.note).toMatch(/unverified/i);
+
+    // Scoped to the DATA, not the note: the note deliberately contains the words
+    // "heating" and "ventilating" because it is the instruction not to use them.
+    // What must stay free of decoded labels is the reported value itself.
+    const positions = JSON.stringify(payload.climate.seats.positions).toLowerCase();
+    for (const invented of ['ventilat', 'cooling', 'heat on', 'level 3', 'off']) {
+      expect(positions, `must not decode the encoding as ${invented}`).not.toContain(invented);
+    }
+    // Every reported leaf is a raw number, never a rendered word.
+    for (const seat of Object.values(payload.climate.seats.positions as Record<string, Record<string, unknown>>)) {
+      for (const value of Object.values(seat)) expect(typeof value).toBe('number');
+    }
+  });
+
+  it('flags absent seat data as absent, not as "no heated seats"', async () => {
+    stub.getVehicleStatus.mockResolvedValue(
+      infoFixture({ vehicleStatus: { doorLock: true, climate: { airCtrl: false } } }),
+    );
+
+    const data = parseToolResult<{ climate: { present: boolean; seats: { present: boolean; note: string } } }>(
+      await harness.callTool('kia_vehicle_status', { vehicle_key: KEY }),
+    );
+
+    expect(data.climate.present).toBe(true);
+    expect(data.climate.seats.present).toBe(false);
+    // Absence has three possible causes and the note must not collapse them
+    // into "this car has no heated seats" — that is a capability claim, and
+    // capability detection needs cmm/gvi's vehicleFeature block, which this
+    // server does not request.
+    expect(data.climate.seats.note).toMatch(/not.*(mean|the same)/i);
+    expect(data.climate.seats).not.toHaveProperty('positions');
+  });
+
   it('flags an absent climate block instead of pretending it is off', async () => {
     stub.getVehicleStatus.mockResolvedValue(
       infoFixture({ vehicleStatus: { doorLock: false, ign3: false, engine: false } }),
