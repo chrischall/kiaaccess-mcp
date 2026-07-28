@@ -226,8 +226,16 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
     { name: 'username', label: 'Kia Owners email' },
     { name: 'password', label: 'Kia Owners password', type: 'password' },
     {
+      // Hidden AND disabled until step 1 actually requests a code. A visible box
+      // labelled "texted code" reads, on a freshly loaded page, like the page
+      // announcing a code was already sent — so a user waits for a text that was
+      // never requested. Worse, while it rendered `required` the browser refused
+      // to submit it empty, which made the whole two-step flow unreachable.
+      // Being disabled is what fixes that: a disabled input is excluded from
+      // validation and from submission.
       name: 'otp',
-      label: 'Texted code — leave blank on your first sign-in, then submit again with the code',
+      label: 'Texted code',
+      revealOnDemand: true,
     },
   ],
   async login(fields, env) {
@@ -288,11 +296,20 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
       });
 
       // Thrown, not returned: the harness renders this on the login page, which
-      // is what makes "failure" read as step 2 of 2.
-      throw new Error(
-        `Kia texted a verification code to ${sent.maskedPhone ?? started.maskedPhone ?? 'your phone'}. ` +
-          'Enter it in the code box and submit again — same email and password. The code expires in about two minutes.',
+      // is what makes "failure" read as step 2 of 2. `revealFields` brings the
+      // code box into play, and `fieldHints` puts the destination directly under
+      // it — where it stays visible while the code is being typed, rather than
+      // only in a banner that reads as transient.
+      const destination = sent.maskedPhone ?? started.maskedPhone ?? 'your phone';
+      const challenge = new Error(
+        `Kia texted a verification code to ${destination}. Enter it below and submit again — the code expires in ` +
+          'about two minutes.',
       );
+      Object.assign(challenge, {
+        revealFields: ['otp'],
+        fieldHints: { otp: `Sent to ${destination}` },
+      });
+      throw challenge;
     }
 
     // ---- Step 2: code supplied — verify it and keep the token. ----

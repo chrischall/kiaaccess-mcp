@@ -194,6 +194,24 @@ describe('kiaAuth.login — step 1 (no code yet)', () => {
     expect(kv.store.size).toBe(0);
   });
 
+  it('reveals the code box and pins the destination under it', async () => {
+    // The rejection IS the step-2 prompt, so it has to carry the instructions:
+    // which field comes into play, and where the code went. Without
+    // revealFields the box stays hidden+disabled and the flow cannot continue.
+    const kv = stubKv();
+    stubGlobalFetch([
+      { headers: { xid: 'x' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
+      { body: { status: OK, payload: { phone: '(***) ***-6609' } } },
+    ]);
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv)).catch((e: Error) => e) as Error & {
+      revealFields?: string[]; fieldHints?: Record<string, string>;
+    };
+
+    expect(err.revealFields).toEqual(['otp']);
+    expect(err.fieldHints?.otp).toContain('6609');
+  });
+
   it('surfaces the masked destination so the user knows where to look', async () => {
     const kv = stubKv();
     stubGlobalFetch([
