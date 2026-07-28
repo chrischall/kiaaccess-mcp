@@ -32,10 +32,11 @@ request a code and collect it, so the login page is submitted **twice**:
 ```
 /authorize login form
 ─────────────────────
-submit 1   email + password, code box EMPTY
+submit 1   email + password — the code box is NOT on the page yet
              └─► prof/authUser + cmm/sendOTP
              └─► {otpKey, xid} parked in OAUTH_KV for 10 min
-             └─► page re-renders: "we texted a code to (***) ***-nnnn"
+             └─► page re-renders with the code box revealed, hinted
+                 "Code texted to (***) ***-nnnn — expires in about two minutes"
 
 submit 2   email + password + the texted code
              └─► cmm/verifyOTP  ──► rmtoken kept in the encrypted OAuth props
@@ -194,13 +195,17 @@ deploying Cloudflare account; if it isn't, remove the `routes` entry and use the
 2. Paste the URL with `/mcp` appended, e.g.
    `https://connector.kiaaccess.nullnet.app/mcp`.
 3. Claude opens the connector's login page (served by the Worker at
-   `/authorize`), which asks for three things:
+   `/authorize`), which asks for:
    - **Kia Owners email**
    - **Kia Owners password**
-   - **Texted code** — left blank on the first submit, then filled in on the
-     second (see the two-submission flow above). This replaces the remember-me
-     token the form used to ask for: the connector now mints one itself, so no
-     local stdio server is involved.
+   - **Texted code** — *not shown on first load.* The first submit sends only
+     the email and password, which is what asks Kia to text a code; the page
+     then re-renders with this box revealed and the masked destination beneath
+     it, and the second submit completes the login (see the two-submission flow
+     above). The box stays hidden until a code has actually been sent, so it
+     cannot read as "a code is already waiting for you" on a freshly loaded
+     page. This replaces the remember-me token the form used to ask for: the
+     connector now mints one itself, so no local stdio server is involved.
 4. The page does not just accept the inputs: it refreshes a real session from
    the token it just minted and reads the vehicle list. Anything wrong — bad
    password, wrong or expired code, unenrolled account — comes back as an error
