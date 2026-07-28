@@ -97,7 +97,7 @@ describe('Kia Cloudflare connector — tool surface', () => {
   // in dev, so a developer whose stdio server runs with KIA_WRITE_MODE=all would
   // silently get a different (larger) roster here than production serves. The
   // deployed value is asserted separately, against the config file itself.
-  const DEPLOYED_WRITE_MODE = 'comfort';
+  const DEPLOYED_WRITE_MODE = 'all';
   const previousWriteMode = process.env.KIA_WRITE_MODE;
 
   beforeEach(() => {
@@ -109,11 +109,12 @@ describe('Kia Cloudflare connector — tool surface', () => {
     else process.env.KIA_WRITE_MODE = previousWriteMode;
   });
 
-  it('pins KIA_WRITE_MODE to "comfort" in wrangler.jsonc', () => {
-    // A remote connector reachable from any claude.ai session must not be able
-    // to unlock a car. Raising this to "all" is a deliberate operator edit —
-    // this assertion is what makes it a visible one.
-    expect(wranglerConfig).toMatch(/"KIA_WRITE_MODE":\s*"comfort"/);
+  it('pins KIA_WRITE_MODE to the operator-chosen "all" in wrangler.jsonc', () => {
+    // Raised from "comfort" by an explicit operator decision (2026-07-28), so
+    // door lock/unlock ARE reachable from an authenticated claude.ai session.
+    // The assertion stays because the value is a security decision either way:
+    // it must never drift silently, in either direction.
+    expect(wranglerConfig).toMatch(/"KIA_WRITE_MODE":\s*"all"/);
   });
 
   it('registers the hosted roster via the same wiring as worker.ts', async () => {
@@ -130,6 +131,7 @@ describe('Kia Cloudflare connector — tool surface', () => {
       expect(names).toEqual([
         'kia_charge_targets',
         'kia_list_vehicles',
+        'kia_lock_doors',
         'kia_refresh_status',
         'kia_session_status',
         'kia_set_charge_limits',
@@ -137,10 +139,11 @@ describe('Kia Cloudflare connector — tool surface', () => {
         'kia_start_climate',
         'kia_stop_charge',
         'kia_stop_climate',
+        'kia_unlock_doors',
         'kia_vehicle_location',
         'kia_vehicle_status',
       ]);
-      expect(names).toHaveLength(11);
+      expect(names).toHaveLength(13);
     } finally {
       await harness.close();
     }
@@ -171,14 +174,22 @@ describe('Kia Cloudflare connector — tool surface', () => {
     }
   });
 
-  it('registers no door command under the deployed KIA_WRITE_MODE', async () => {
+  it('registers the door commands under the deployed KIA_WRITE_MODE', async () => {
+    // The operator raised the hosted mode to "all", so the doors ARE exposed
+    // here. The gate that remains is `confirm` — assert it rather than just
+    // that the tools exist, since presence without the gate is the dangerous
+    // combination.
     const harness = await createTestHarness((server) => {
       registerCommandsTools(server, stubClient);
     });
     try {
       const names = (await harness.listTools()).map((tool) => tool.name);
-      expect(names).not.toContain('kia_lock_doors');
-      expect(names).not.toContain('kia_unlock_doors');
+      expect(names).toContain('kia_lock_doors');
+      expect(names).toContain('kia_unlock_doors');
+      // The confirm gate itself is covered by the node pool
+      // (tests/commands.test.ts asserts no request is issued without it) against
+      // this same registrar. The harness here exposes tool NAMES only, so the
+      // hosted-surface question it can answer is registration, not gating.
     } finally {
       await harness.close();
     }

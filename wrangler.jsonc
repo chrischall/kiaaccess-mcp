@@ -32,11 +32,18 @@
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "5773afe3357541a79f60d8bb67a27221" }],
 
   // Command-registration ceiling for the HOSTED deployment, read by
-  // `getKiaWriteMode()` through `process.env`. "comfort" registers climate and
-  // charging but NOT door lock/unlock: a remote connector reachable from any
-  // claude.ai session is the last place that should be able to unlock a car.
-  // Raising this to "all" is a deliberate operator decision, not a default.
-  "vars": { "KIA_WRITE_MODE": "comfort" },
+  // `getKiaWriteMode()` through `process.env`.
+  //
+  // "all" — the operator's explicit decision (2026-07-28), raised from the
+  // "comfort" default. Door lock/unlock are therefore reachable from any
+  // authenticated claude.ai session, not just local stdio. What still stands
+  // between a session and an unlocked car:
+  //   - the OAuth login, whose props are encrypted at rest in OAUTH_KV;
+  //   - `confirm: true` on every command — without it no request is sent and
+  //     the tool returns a dry-run preview.
+  // Lower this back to "comfort" (or "none") to withdraw that reach; the value
+  // is read per registration, so a redeploy is all it takes.
+  "vars": { "KIA_WRITE_MODE": "all" },
 
   // Production custom domain (matches the fleet's connector.<service>.nullnet.app
   // pattern). The zone must be in the deploying account; wrangler provisions the
