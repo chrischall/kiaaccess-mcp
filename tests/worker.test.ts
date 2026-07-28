@@ -10,7 +10,7 @@
  *
  *  1. the OAuth default handler serves the authorization-server discovery doc;
  *  2. an unauthenticated `/mcp` request is rejected before any tool code runs;
- *  3. `/authorize` renders the Kia login page with all three fields;
+ *  3. `/authorize` renders the Kia login page, MFA-first (no token paste);
  *  4. the exact registrar wiring `src/worker.ts` uses produces the intended
  *     roster — specifically WITHOUT the MFA bootstrap tools and the
  *     refresh-token export;
@@ -63,7 +63,7 @@ describe('Kia Cloudflare connector — OAuth surface', () => {
     expect(res.status).toBe(401);
   });
 
-  it('GET /authorize renders the Kia login page with all three fields', async () => {
+  it('GET /authorize renders the MFA-first Kia login page', async () => {
     // No `client_id` is needed — the page renders without a registered OAuth
     // client, which is all this asserts. `redirect_uri` IS required though:
     // since workers-oauth-provider 0.8.x, `parseAuthRequest` always runs
@@ -81,13 +81,20 @@ describe('Kia Cloudflare connector — OAuth surface', () => {
     expect(html).toContain('Kia Access');
     expect(html).toContain('Kia Owners email');
     expect(html).toContain('Kia Owners password');
-    // The token field has to tell the user where the value comes from — there
-    // is nowhere else in this flow to explain it.
-    expect(html).toContain('kia_export_refresh_token');
-    // Password AND token are both masked inputs.
-    expect(html.match(/type="password"/g)).toHaveLength(2);
+    // The connector completes Kia's SMS verification itself, so the page must
+    // NOT ask for a remember-me token — needing one would force the user
+    // through the local stdio server first.
+    expect(html).not.toContain('kia_export_refresh_token');
+    // The privacy note still MENTIONS the remember-me token — the connector
+    // does keep one — but there must be no field asking the user to supply it.
+    expect(html).not.toMatch(/name=["']rmtoken["']/i);
+    expect(html).not.toMatch(/label[^>]*>[^<]*remember-me/i);
+    // A code box, explained inline: it is blank on the first submit.
+    expect(html).toMatch(/code/i);
+    // Only the password is masked; the single-use code stays readable.
+    expect(html.match(/type="password"/g)).toHaveLength(1);
     // The consent text must admit the password is stored, not just checked.
-    expect(html).toContain('stored encrypted');
+    expect(html).toContain('encrypted');
   });
 });
 

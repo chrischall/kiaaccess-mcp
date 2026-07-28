@@ -25,32 +25,40 @@ deployment possible at all is the *remember-me token* (`rmtoken`): a
 `prof/authUser` call carrying it returns a fresh session id with **no MFA
 challenge**, and the token is not rotated (see [KIA-API.md](./KIA-API.md) §4).
 
-So every user of this connector must do the MFA bootstrap **once, locally**, on
-the stdio server, and then paste the resulting token into the connector's login
-page:
+The connector performs that bootstrap **itself**, so the user never handles a
+token and never needs the local stdio server. A one-shot form cannot both
+request a code and collect it, so the login page is submitted **twice**:
 
 ```
-local stdio server                     hosted connector
-──────────────────                     ────────────────
-kia_start_login          ─┐
-kia_send_otp              ├─ one time  
-kia_verify_otp           ─┘
-kia_export_refresh_token ───── rmtoken ──► /authorize login form
+/authorize login form
+─────────────────────
+submit 1   email + password, code box EMPTY
+             └─► prof/authUser + cmm/sendOTP
+             └─► {otpKey, xid} parked in OAUTH_KV for 10 min
+             └─► page re-renders: "we texted a code to (***) ***-nnnn"
+
+submit 2   email + password + the texted code
+             └─► cmm/verifyOTP  ──► rmtoken kept in the encrypted OAuth props
+             └─► verified for real: refresh + ownr/gvl before anything is stored
 ```
 
-Consequently `kia_start_login`, `kia_send_otp`, `kia_verify_otp` and
-`kia_export_refresh_token` are **not registered** on the Worker. They are not
-hidden or gated — they do not exist there, so nothing a host or a prompt does
-can invoke them.
+The parked state is not a credential: `otpKey`/`xid` are per-attempt handles,
+useless without the password, and they expire with the code. The password is
+never written to KV by this flow. A consumed code is deleted, so it cannot be
+replayed.
+
+`kia_start_login`, `kia_send_otp`, `kia_verify_otp` and
+`kia_export_refresh_token` remain **not registered** on the Worker — the login
+page covers the bootstrap, and the export tool would hand a full MFA bypass to
+any hosted session. They are not hidden or gated; they do not exist there, so
+nothing a host or a prompt does can invoke them.
 
 > **Unverified:** the live capture never established whether Kia binds an
 > `rmtoken` to the device id it was minted against. The Worker has no filesystem,
 > so it derives a stable device id from the account email
-> (`hostedDeviceId` in `src/kia-auth.ts`) rather than reusing the local server's.
-> If Kia *does* bind them, the login page will say so on the spot — `login()`
-> performs a real refresh plus a real `ownr/gvl` read before accepting anything,
-> so a token that cannot work here fails at paste time rather than mysteriously
-> later.
+> (`hostedDeviceId` in `src/kia-auth.ts`). This now matters less than it did
+> under the paste flow: the token is minted *by the Worker, under the Worker's
+> own device id*, so there is no cross-device reuse to bind against.
 
 ---
 
@@ -189,11 +197,14 @@ deploying Cloudflare account; if it isn't, remove the `routes` entry and use the
    `/authorize`), which asks for three things:
    - **Kia Owners email**
    - **Kia Owners password**
-   - **Kia remember-me token** — from `kia_export_refresh_token` on the user's
-     own local stdio server, after completing the one-time MFA login there.
-4. The page does not just accept the paste: it refreshes a real session from the
-   token and reads the vehicle list. A wrong value comes back as an error on the
-   form, not as a broken connector.
+   - **Texted code** — left blank on the first submit, then filled in on the
+     second (see the two-submission flow above). This replaces the remember-me
+     token the form used to ask for: the connector now mints one itself, so no
+     local stdio server is involved.
+4. The page does not just accept the inputs: it refreshes a real session from
+   the token it just minted and reads the vehicle list. Anything wrong — bad
+   password, wrong or expired code, unenrolled account — comes back as an error
+   on the form rather than as a connector that fails later.
 
 The connector is unlisted — it appears only for people you share the URL with.
 Anyone with the URL who completes their own Kia login uses it under their own

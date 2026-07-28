@@ -150,7 +150,7 @@ Every endpoint here was verified live against a 2024 EV9 — the reads and the f
 
 ## Hosted connector
 
-The same tools can run as a Cloudflare Worker for use as a remote connector on [claude.ai](https://claude.ai). The MFA bootstrap cannot work there (the passcode arrives minutes later, on another device), so you bootstrap locally, export the token with `kia_export_refresh_token`, and hand it to the connector's login page, which stores it in your encrypted credentials. See [`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md).
+The same tools can run as a Cloudflare Worker for use as a remote connector on [claude.ai](https://claude.ai). Sign in with your Kia email and password on the connector's own login page: submit once to have Kia text you a code, then submit again with the code. The connector completes the verification itself and keeps the resulting remember-me token in your encrypted credentials, so it never asks again — you do not need the local server, and you never handle a token. See [`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md).
 
 ## Development
 

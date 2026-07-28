@@ -20,11 +20,21 @@ import { BASE_URL, ENDPOINTS } from '../src/protocol.js';
 const OK = { statusCode: 0, errorType: 0, errorCode: 0, errorMessage: 'Success with response body' };
 const FAIL = { statusCode: 1, errorType: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' };
 
-const GOOD_FIELDS = {
-  username: 'Driver@Example.test',
-  password: 'fake-password',
-  rmtoken: 'fake-rmtoken',
-};
+const CREDS = { username: 'Driver@Example.test', password: 'fake-password' };
+
+/** In-memory stand-in for the OAUTH_KV binding the two-step flow parks state in. */
+function stubKv() {
+  const store = new Map<string, string>();
+  return {
+    store,
+    binding: {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => void store.set(k, v),
+      delete: async (k: string) => void store.delete(k),
+    },
+  };
+}
+const envWith = (kv: ReturnType<typeof stubKv>) => ({ OAUTH_KV: kv.binding });
 
 interface StubResponse {
   body: unknown;
@@ -88,13 +98,247 @@ describe('hostedDeviceId', () => {
   });
 });
 
+describe('kiaAuth — form definition', () => {
+  it('collects email, password and a code box — never a remember-me token', () => {
+    // The token is minted HERE by the OTP flow. Asking the user to paste one
+    // was the old design and forced them to run the local stdio server first,
+    // which defeats the point of a hosted connector.
+    expect(kiaAuth.fields.map((f) => f.name)).toEqual(['username', 'password', 'otp']);
+    expect(JSON.stringify(kiaAuth.fields)).not.toMatch(/rmtoken/i);
+  });
+
+  it('masks the password but not the texted code', () => {
+    const byName = Object.fromEntries(kiaAuth.fields.map((f) => [f.name, f]));
+    expect(byName.password.type).toBe('password');
+    // Single-use and expires in ~2 minutes; masking only makes it harder to type.
+    expect(byName.otp.type).toBeUndefined();
+  });
+
+  it('says plainly in the privacy note that the password is retained', () => {
+    // It must be: Kia demands it on every session renewal, so claiming
+    // otherwise would be a lie the storage layer contradicts.
+    expect(kiaAuth.privacyNote).toMatch(/password/i);
+    expect(kiaAuth.privacyNote).toMatch(/encrypted/i);
+  });
+});
+
+describe('kiaAuth.login — step 1 (no code yet)', () => {
+  it('authenticates, sends an SMS, stashes the handles and asks for the code', async () => {
+    const kv = stubKv();
+    const { calls } = stubGlobalFetch([
+      { headers: { xid: 'fake-xid' }, body: { status: OK, payload: { otpKey: 'fake-otpkey', nextAction: 'MFA_REQUIRED' } } },
+      { body: { status: OK, payload: { message: 'OTP sent successfully', phone: '(***) ***-6609' } } },
+    ]);
+
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/code/i);
+
+    expect(calls[0].url).toContain(ENDPOINTS.authUser);
+    expect(calls[1].url).toContain(ENDPOINTS.sendOtp);
+    const stashed = JSON.parse([...kv.store.values()][0]);
+    expect(stashed).toEqual({ otpKey: 'fake-otpkey', xid: 'fake-xid' });
+    // The stash must never carry a credential — only per-attempt handles.
+    expect(JSON.stringify(stashed)).not.toContain(CREDS.password);
+  });
+
+  it('sanitizes a wrong password on the FIRST submit — the commonest failure', async () => {
+    // Kia's error body can echo the request that carried the password, so this
+    // path must go through describeLoginFailure (which truncates/redacts) and
+    // not surface a raw KiaApiError on the login page.
+    const kv = stubKv();
+    stubGlobalFetch([{ body: { status: FAIL } }]);
+
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/Could not sign in to Kia/);
+    // Nothing was stashed, because nothing was sent.
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('never lets the submitted password reach the login page in an error', async () => {
+    const kv = stubKv();
+    // A hostile/naive upstream echoing the request straight back at us.
+    stubGlobalFetch([
+      {
+        body: {
+          status: { ...FAIL, errorMessage: `rejected for userCredential.password=${CREDS.password}` },
+        },
+      },
+    ]);
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv)).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain(CREDS.password);
+    expect((err as Error).message).toContain('[redacted]');
+  });
+
+  it('scrubs the minted token too, not just the password', async () => {
+    // verifiedProps runs after a successful verifyOTP, so an upstream echo at
+    // that point could carry the remember-me token — a full MFA bypass.
+    const kv = stubKv();
+    kv.store.set('mfa:driver@example.test', JSON.stringify({ otpKey: 'k', xid: 'x' }));
+    stubGlobalFetch([
+      { headers: { sid: 's', rmtoken: 'fake-rmtoken' }, body: { status: OK } },
+      { body: { status: { ...FAIL, errorMessage: 'upstream echoed fake-rmtoken back' } } },
+    ]);
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv)).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain('fake-rmtoken');
+  });
+
+  it('sanitizes a failure while dispatching the code', async () => {
+    const kv = stubKv();
+    stubGlobalFetch([
+      { headers: { xid: 'x' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
+      { body: { status: FAIL } },
+    ]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/Could not sign in to Kia/);
+    // The stash is only written AFTER a successful send, so a failed dispatch
+    // must not leave handles behind for a code that was never delivered.
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('surfaces the masked destination so the user knows where to look', async () => {
+    const kv = stubKv();
+    stubGlobalFetch([
+      { headers: { xid: 'fake-xid' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
+      { body: { status: OK, payload: { phone: '(***) ***-6609' } } },
+    ]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/6609/);
+  });
+
+  it('still names a destination when Kia returns no masked phone', async () => {
+    // Both payloads omit it; the message must stay useful rather than render
+    // "sent a code to undefined".
+    const kv = stubKv();
+    stubGlobalFetch([
+      { headers: { xid: 'x' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
+      { body: { status: OK, payload: {} } },
+    ]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/your phone/i);
+  });
+
+  it('refuses a login with no email or no password before touching the network', async () => {
+    const kv = stubKv();
+    const { calls } = stubGlobalFetch([]);
+    await expect(kiaAuth.login({ username: '', password: 'x', otp: '' }, envWith(kv))).rejects.toThrow(/email/i);
+    await expect(kiaAuth.login({ username: 'a@b.test', password: '', otp: '' }, envWith(kv))).rejects.toThrow(/password/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('treats entirely absent fields as empty rather than throwing on undefined', async () => {
+    // The harness passes whatever the form posted; a missing key must read as
+    // blank, not blow up in `.trim()` before the friendly validation runs.
+    const kv = stubKv();
+    const { calls } = stubGlobalFetch([]);
+    await expect(kiaAuth.login({}, envWith(kv))).rejects.toThrow(/email/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('fails clearly when the deployment has no OAUTH_KV to carry the code', async () => {
+    const { calls } = stubGlobalFetch([]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, {})).rejects.toThrow(/OAUTH_KV|misconfigured/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not pretend to succeed when Kia skips the challenge', async () => {
+    // A remember-me token only ever comes back from verifyOTP. With no
+    // challenge there is nothing durable to store, so accepting the login
+    // would strand a session that dies at the first refresh.
+    const kv = stubKv();
+    stubGlobalFetch([
+      // otpKey present but not MFA_REQUIRED — startLogin throws outright when
+      // the key is missing, so this is the only shape reaching the branch.
+      { headers: { xid: 'x' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'NONE' } } },
+    ]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/verification/i);
+  });
+});
+
+describe('kiaAuth.login — step 2 (code supplied)', () => {
+  const primed = () => {
+    const kv = stubKv();
+    kv.store.set('mfa:driver@example.test', JSON.stringify({ otpKey: 'fake-otpkey', xid: 'fake-xid' }));
+    return kv;
+  };
+
+  it('verifies the code, keeps the token, and proves it works before storing', async () => {
+    const kv = primed();
+    const { calls } = stubGlobalFetch([
+      { headers: { sid: 'fake-sid', rmtoken: 'fake-rmtoken' }, body: { status: OK } },
+      ...LOGIN_OK,
+    ]);
+
+    const props = await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv));
+
+    expect(calls[0].url).toContain(ENDPOINTS.verifyOtp);
+    expect(props).toEqual({ username: CREDS.username, password: CREDS.password, rmtoken: 'fake-rmtoken' });
+    // The trailing calls are the real proof: refresh, then a live read.
+    expect(calls[2].url).toContain('ownr/gvl');
+  });
+
+  it('consumes the stash so a code cannot be replayed', async () => {
+    const kv = primed();
+    stubGlobalFetch([{ headers: { sid: 's', rmtoken: 't' }, body: { status: OK } }, ...LOGIN_OK]);
+    await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv));
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('tells the user to request a fresh code when the stash has expired', async () => {
+    const kv = stubKv();
+    const { calls } = stubGlobalFetch([]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv))).rejects.toThrow(/expired|fresh/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('renders a non-Error rejection without crashing on .message', async () => {
+    // fetch itself can reject with a string or a DOMException in workerd, so
+    // the failure formatter must not assume an Error was thrown.
+    const kv = primed();
+    vi.stubGlobal('fetch', async () => {
+      throw 'connection reset';
+    });
+    await expect(kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv))).rejects.toThrow(/connection reset/);
+  });
+
+  it('reports a wrong code without retrying it', async () => {
+    // A retry burns Kia's loginAttempt budget toward enforceRecaptcha, which
+    // breaks server-side auth for the account permanently.
+    const kv = primed();
+    const { calls } = stubGlobalFetch([{ body: { status: FAIL } }]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '000000' }, envWith(kv))).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('rejects the login when the post-verification read fails', async () => {
+    // The code was right, but the resulting session cannot actually read the
+    // account (unenrolled vehicle, revoked access). Storing those props would
+    // defer the failure into a later tool call, so it fails here instead.
+    const kv = primed();
+    stubGlobalFetch([
+      { headers: { sid: 's', rmtoken: 'fake-rmtoken' }, body: { status: OK } },
+      { headers: { sid: 's' }, body: { status: OK } },
+      { body: { status: FAIL } },
+    ]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv))).rejects.toThrow();
+  });
+
+  it('trims whitespace a copy/paste drags into the email and code', async () => {
+    const kv = primed();
+    stubGlobalFetch([{ headers: { sid: 's', rmtoken: 'fake-rmtoken' }, body: { status: OK } }, ...LOGIN_OK]);
+    const props = await kiaAuth.login(
+      { username: '  Driver@Example.test ', password: CREDS.password, otp: ' 038291 ' },
+      envWith(kv),
+    );
+    // Trimmed, not case-folded: hostedDeviceId normalises case itself and the
+    // stash key is lowercased, so both submissions agree either way.
+    expect(props.username).toBe('Driver@Example.test');
+  });
+});
+
 describe('buildHostedKiaClient', () => {
   it('configures the client from the props, with the derived device id', () => {
-    const client = buildHostedKiaClient({ ...GOOD_FIELDS });
+    const client = buildHostedKiaClient({ ...CREDS, rmtoken: 'fake-rmtoken' });
     const config = client.describeConfig();
     expect(config.configured).toBe(true);
     expect(config.accountId).toBe('driver@example.test');
-    expect(config.deviceId).toBe(hostedDeviceId(GOOD_FIELDS.username));
+    expect(config.deviceId).toBe(hostedDeviceId({ ...CREDS, rmtoken: 'fake-rmtoken' }.username));
     // The rmtoken came from the props, so the hosted session is live with no
     // MFA bootstrap and no filesystem read.
     expect(config.hasSession).toBe(true);
@@ -103,7 +347,7 @@ describe('buildHostedKiaClient', () => {
   it('ignores KIA_USERNAME/KIA_PASSWORD — one isolate serves many users', () => {
     vi.stubEnv('KIA_USERNAME', 'someone-else@example.test');
     vi.stubEnv('KIA_PASSWORD', 'not-this-one');
-    const client = buildHostedKiaClient({ ...GOOD_FIELDS });
+    const client = buildHostedKiaClient({ ...CREDS, rmtoken: 'fake-rmtoken' });
     expect(client.describeConfig().accountId).toBe('driver@example.test');
     vi.unstubAllEnvs();
   });
@@ -111,111 +355,8 @@ describe('buildHostedKiaClient', () => {
   it('persists nothing — the Worker has no filesystem', () => {
     // `nullSessionIO` is what makes this safe; exporting the token back out is
     // a pure read of what was passed in, never a disk read.
-    const client = buildHostedKiaClient({ ...GOOD_FIELDS });
+    const client = buildHostedKiaClient({ ...CREDS, rmtoken: 'fake-rmtoken' });
     expect(client.exportRmToken()).toBe('fake-rmtoken');
     expect(() => client.forgetSession()).not.toThrow();
-  });
-});
-
-describe('kiaAuth — form definition', () => {
-  it('collects exactly the three fields a silent refresh needs', () => {
-    expect(kiaAuth.fields.map((field) => field.name)).toEqual(['username', 'password', 'rmtoken']);
-  });
-
-  it('masks both secrets on the login page', () => {
-    const secret = kiaAuth.fields.filter((field) => field.type === 'password').map((field) => field.name);
-    expect(secret).toEqual(['password', 'rmtoken']);
-  });
-
-  it('states honestly that all three values are stored, and why', () => {
-    // The password is NOT a one-time check: Kia's refresh sends the full
-    // credential body alongside the rmtoken. Saying otherwise would be a lie
-    // shown to the user at the moment they consent.
-    expect(kiaAuth.privacyNote).toMatch(/stored encrypted/i);
-    expect(kiaAuth.privacyNote).toMatch(/password/i);
-    expect(kiaAuth.privacyNote).toMatch(/token/i);
-    expect(kiaAuth.privacyNote).toMatch(/every session renewal/i);
-  });
-});
-
-describe('kiaAuth.login — verification', () => {
-  it('really refreshes the session and reads the vehicle list before accepting', async () => {
-    const { calls } = stubGlobalFetch(LOGIN_OK);
-
-    const props = await kiaAuth.login({ ...GOOD_FIELDS }, {});
-
-    expect(calls).toHaveLength(2);
-    // 1. prof/authUser with the pasted rmtoken — the real proof it works.
-    expect(calls[0].url).toBe(`${BASE_URL}${ENDPOINTS.authUser}`);
-    expect((calls[0].init.headers as Record<string, string>).rmtoken).toBe('fake-rmtoken');
-    // 2. the cheap read, under the sid that refresh produced.
-    expect(calls[1].url).toBe(`${BASE_URL}${ENDPOINTS.vehicleList}`);
-    expect((calls[1].init.headers as Record<string, string>).sid).toBe('fake-sid');
-
-    expect(props).toEqual({ username: 'Driver@Example.test', password: 'fake-password', rmtoken: 'fake-rmtoken' });
-  });
-
-  it('trims the pasted email and token — a copy/paste picks up whitespace', async () => {
-    stubGlobalFetch(LOGIN_OK);
-    const props = await kiaAuth.login(
-      { username: '  driver@example.test\n', password: 'fake-password', rmtoken: ' fake-rmtoken ' },
-      {},
-    );
-    expect(props.username).toBe('driver@example.test');
-    expect(props.rmtoken).toBe('fake-rmtoken');
-  });
-
-  it('rejects a bad token/password with a message that names all three inputs', async () => {
-    stubGlobalFetch([{ body: { status: FAIL } }]);
-    await expect(kiaAuth.login({ ...GOOD_FIELDS }, {})).rejects.toThrow(/Could not connect to Kia/);
-    await expect(
-      kiaAuth.login({ ...GOOD_FIELDS }, {}).catch((err: Error) => err.message),
-    ).resolves.toMatch(/email, password, and remember-me token/i);
-  });
-
-  it('mentions the device-binding possibility — the one failure a user cannot guess', async () => {
-    stubGlobalFetch([{ body: { status: FAIL } }]);
-    const message = await kiaAuth.login({ ...GOOD_FIELDS }, {}).catch((err: Error) => err.message);
-    expect(message).toMatch(/tied to the device/i);
-    expect(message).toMatch(/kia_export_refresh_token/);
-  });
-
-  it('never retries a credential rejection — that is what escalates to reCAPTCHA', async () => {
-    const { calls } = stubGlobalFetch([{ body: { status: FAIL } }]);
-    await expect(kiaAuth.login({ ...GOOD_FIELDS }, {})).rejects.toThrow();
-    expect(calls).toHaveLength(1);
-  });
-
-  it('surfaces a non-Error rejection without crashing on `.message`', async () => {
-    vi.stubGlobal('fetch', async () => {
-      throw 'socket exploded'; // eslint-disable-line no-throw-literal
-    });
-    await expect(kiaAuth.login({ ...GOOD_FIELDS }, {})).rejects.toThrow(/socket exploded/);
-  });
-
-  it('leaks no secret into the login-page error text', async () => {
-    // The failing request carried the password and the token; the message that
-    // comes back gets rendered into HTML on a page the user is looking at.
-    stubGlobalFetch([{ body: { status: FAIL } }]);
-    const message = await kiaAuth.login({ ...GOOD_FIELDS }, {}).catch((err: Error) => err.message);
-    expect(message).not.toContain('fake-password');
-    expect(message).not.toContain('fake-rmtoken');
-  });
-
-  it('refuses an incomplete form before making any network call', async () => {
-    const { calls } = stubGlobalFetch([]);
-    // Each missing field, including the `undefined` shape a hand-built POST can
-    // produce (the connector itself normalises absent fields to '').
-    await expect(kiaAuth.login({} as Record<string, string>, {})).rejects.toThrow(/all required/i);
-    await expect(kiaAuth.login({ ...GOOD_FIELDS, username: '  ' }, {})).rejects.toThrow(/all required/i);
-    await expect(kiaAuth.login({ ...GOOD_FIELDS, password: '' }, {})).rejects.toThrow(/all required/i);
-    await expect(kiaAuth.login({ ...GOOD_FIELDS, rmtoken: '' }, {})).rejects.toThrow(/all required/i);
-    expect(calls).toHaveLength(0);
-  });
-
-  it('points an unbootstrapped user at the local server, since MFA cannot run here', async () => {
-    const message = await kiaAuth.login({} as Record<string, string>, {}).catch((err: Error) => err.message);
-    expect(message).toMatch(/kia_export_refresh_token/);
-    expect(message).toMatch(/MFA cannot be completed here/i);
   });
 });

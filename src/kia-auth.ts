@@ -30,6 +30,7 @@
 import { truncateErrorMessage } from '@chrischall/mcp-utils';
 import type { ConnectorAuth } from '@chrischall/mcp-connector';
 import { KiaClient } from './client.js';
+import { sendOtp, startLogin, verifyOtp } from './auth.js';
 import { nullSessionIO } from './session.js';
 
 /**
@@ -132,71 +133,177 @@ export function buildHostedKiaClient(props: KiaProps): KiaClient {
  * (`truncateErrorMessage`) before it is shown, because Kia error bodies are
  * echoed verbatim and the request that produced them carried a password.
  */
-function describeLoginFailure(err: unknown): Error {
-  const raw = err instanceof Error ? err.message : String(err);
+function describeLoginFailure(err: unknown, ...secrets: string[]): Error {
+  let raw = err instanceof Error ? err.message : String(err);
+  // `truncateErrorMessage` redacts known secret SHAPES (Bearer, JWT, sk-…). A
+  // password is not a recognisable shape, and Kia's error bodies can echo the
+  // request that carried it — so scrub the literal values we know we just sent
+  // before any of this reaches the login page. Belt and braces: the generic
+  // redactor still runs afterwards for anything token-shaped.
+  for (const secret of secrets) {
+    // Guard, not decoration: `split('')` on an empty needle splits EVERY
+    // character, which would splice the placeholder through the whole message.
+    // Unreachable from the current call sites (all four pass values already
+    // validated non-empty), but load-bearing the moment one passes an optional.
+    /* v8 ignore next */
+    if (secret) raw = raw.split(secret).join('[redacted]');
+  }
   return new Error(
-    `Could not connect to Kia: ${truncateErrorMessage(raw)} — check the email, password, and remember-me ` +
-      'token. The token must be the CURRENT value from the local kiaaccess-mcp server ' +
-      '(kia_export_refresh_token), and it may be tied to the device it was created on, in which case it cannot ' +
-      'be reused here.',
+    `Could not sign in to Kia: ${truncateErrorMessage(raw)} — check the email and password. If you were entering ` +
+      'a texted code, it must be the most recent one; codes expire after about two minutes, so clear the code box ' +
+      'and submit again to have a fresh one sent.',
   );
 }
 
 /**
- * The hosted connector's login: three fields, verified for real.
+ * The hosted connector's login: the MFA bootstrap runs HERE, so the user never
+ * handles a remember-me token.
  *
- * `login()` does not merely shape-check the paste — it constructs the same
- * client the connector will use and calls `listVehicles()`, which forces
- * (1) a full `prof/authUser` refresh from the pasted `rmtoken` and
- * (2) a cheap `ownr/gvl` read under the resulting `sid`. Anything wrong — bad
- * password, stale/foreign token, unenrolled account — throws here and is
- * rendered back on the login page, rather than surfacing later as an
- * inscrutable failure inside a tool call.
+ * Kia challenges every password login with an OTP, and a one-shot form cannot
+ * both request a code and collect it. So this is a TWO-SUBMISSION flow, with
+ * the short-lived handles parked in `OAUTH_KV` between them:
+ *
+ *   submit 1 (code box empty) — `prof/authUser` + `cmm/sendOTP`, stash
+ *     {otpKey, xid} under a 10-minute key, then THROW a message telling the
+ *     user a code was sent. The harness renders a thrown error on the login
+ *     page, which is what turns "failure" into "step 2 of 2".
+ *   submit 2 (code filled in) — read the stash, `cmm/verifyOTP`, and keep the
+ *     `rmtoken` Kia returns. That token is the MFA bypass, so every later
+ *     session renewal is silent.
+ *
+ * The stash holds no credential: `otpKey`/`xid` are per-attempt handles, useless
+ * without the password, and they expire with the code. The password is never
+ * written to KV by this flow — only the harness's own encrypted props hold it.
+ *
+ * Either way the returned props are verified for real before they are stored:
+ * the same client the connector will use performs a refresh + `ownr/gvl` read.
  *
  * Note the one thing this must NOT do: retry. A rejected credential increments
  * Kia's `loginAttempt` and eventually sets `enforceRecaptcha`, which would break
  * server-side auth for the account permanently. `KiaClient` never retries a
  * credential rejection, and neither does this.
  */
+/** The slice of a Workers KV binding this flow uses. Typed locally so the file stays node-loadable. */
+interface KVLike {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+/**
+ * Prove the props actually work before the harness stores them: build the very
+ * client the connector will use and force a refresh + a cheap `ownr/gvl` read.
+ * Anything wrong surfaces on the login page instead of inside a later tool call.
+ */
+async function verifiedProps(props: KiaProps): Promise<KiaProps> {
+  try {
+    await buildHostedKiaClient(props).listVehicles();
+  } catch (err) {
+    throw describeLoginFailure(err, props.password, props.rmtoken);
+  }
+  return props;
+}
+
 export const kiaAuth: ConnectorAuth<KiaProps> = {
   service: 'Kia Access',
   accent: '#05141F',
   privacyNote:
-    'Your Kia email, password, and remember-me token are all stored encrypted and used only to control your own ' +
-    'vehicle. The password and token are both kept because Kia requires both on every session renewal — the token ' +
-    'alone cannot sign in.',
+    'Your Kia email and password are stored encrypted and used only to control your own vehicle. Signing in here ' +
+    'completes Kia\'s one-time SMS verification and keeps the remember-me token it returns, so you are not asked ' +
+    'for a code again. The password is kept because Kia requires it on every session renewal — the token alone ' +
+    'cannot sign in.',
   fields: [
     { name: 'username', label: 'Kia Owners email' },
     { name: 'password', label: 'Kia Owners password', type: 'password' },
     {
-      name: 'rmtoken',
-      label: 'Kia remember-me token (from kia_export_refresh_token)',
-      type: 'password',
+      name: 'otp',
+      label: 'Texted code — leave blank on your first sign-in, then submit again with the code',
     },
   ],
-  async login(fields) {
+  async login(fields, env) {
     const username = (fields.username ?? '').trim();
     const password = fields.password ?? '';
-    const rmtoken = (fields.rmtoken ?? '').trim();
+    const otp = (fields.otp ?? '').trim();
 
-    if (!username || !password || !rmtoken) {
+    if (!username || !password) {
+      throw new Error('Your Kia Owners email and password are both required.');
+    }
+
+    const deviceId = hostedDeviceId(username);
+    const kv = (env as { OAUTH_KV?: KVLike } | undefined)?.OAUTH_KV;
+    if (!kv) {
       throw new Error(
-        'Email, password, and remember-me token are all required. Get the token by running ' +
-          'kia_export_refresh_token on your local kiaaccess-mcp server after completing the one-time MFA login ' +
-          'there — MFA cannot be completed here.',
+        'This connector is misconfigured: no OAUTH_KV binding, so the verification code cannot be carried ' +
+          'between the two sign-in steps. Contact whoever deployed it.',
+      );
+    }
+    const stashKey = `mfa:${username.toLowerCase()}`;
+
+    // ---- Step 1: no code yet — authenticate and dispatch one. ----
+    if (!otp) {
+      // Wrapped individually, not as a block: the two deliberate throws below
+      // are control flow ("code sent", "no challenge"), not failures, and must
+      // reach the page verbatim. Only the API calls get sanitized — a rejected
+      // password is the commonest failure here, and Kia's error body can echo
+      // the request that carried it.
+      let started;
+      try {
+        started = await startLogin({ username, password }, deviceId);
+      } catch (err) {
+        throw describeLoginFailure(err, password);
+      }
+
+      if (!started.mfaRequired) {
+        // Never observed live — Kia challenged every password login during
+        // development. Handled honestly rather than guessed at: a remember-me
+        // token is only ever returned by cmm/verifyOTP, so with no challenge
+        // there is nothing durable to store and no way to renew a session
+        // later. Fail with something actionable instead of storing a session
+        // that would silently die at the first refresh.
+        throw new Error(
+          'Kia accepted the password without asking for a verification code, which this connector cannot use: ' +
+            'the remember-me token it needs is only issued as part of the code flow. Sign out of the Kia app and ' +
+            'back in to re-arm verification, then try again.',
+        );
+      }
+
+      let sent;
+      try {
+        sent = await sendOtp({ otpKey: started.otpKey, xid: started.xid, notifyType: 'SMS' }, deviceId);
+      } catch (err) {
+        throw describeLoginFailure(err, password);
+      }
+      await kv.put(stashKey, JSON.stringify({ otpKey: started.otpKey, xid: started.xid }), {
+        expirationTtl: 600,
+      });
+
+      // Thrown, not returned: the harness renders this on the login page, which
+      // is what makes "failure" read as step 2 of 2.
+      throw new Error(
+        `Kia texted a verification code to ${sent.maskedPhone ?? started.maskedPhone ?? 'your phone'}. ` +
+          'Enter it in the code box and submit again — same email and password. The code expires in about two minutes.',
       );
     }
 
-    const props: KiaProps = { username, password, rmtoken };
-    try {
-      // Verify for real: this refreshes the session from the token (prof/authUser
-      // with the `rmtoken` header) and then reads the vehicle list. We discard
-      // the result — the per-session client is rebuilt from the stored props.
-      await buildHostedKiaClient(props).listVehicles();
-    } catch (err) {
-      throw describeLoginFailure(err);
+    // ---- Step 2: code supplied — verify it and keep the token. ----
+    const stashed = await kv.get(stashKey);
+    if (!stashed) {
+      throw new Error(
+        'That code has expired, or no code was requested for this account. Clear the code box and submit again ' +
+          'to have a fresh one sent.',
+      );
     }
+    const { otpKey, xid } = JSON.parse(stashed) as { otpKey: string; xid: string };
 
-    return props;
+    let rmtoken: string;
+    try {
+      ({ rmtoken } = await verifyOtp({ otpKey, xid, otp }, deviceId));
+    } catch (err) {
+      throw describeLoginFailure(err, password, otp);
+    }
+    // One-shot: a consumed code must not be replayable.
+    await kv.delete(stashKey);
+
+    return await verifiedProps({ username, password, rmtoken });
   },
 };
