@@ -140,6 +140,60 @@ describe('kiaAuth.login — step 1 (no code yet)', () => {
     expect(JSON.stringify(stashed)).not.toContain(CREDS.password);
   });
 
+  it('sanitizes a wrong password on the FIRST submit — the commonest failure', async () => {
+    // Kia's error body can echo the request that carried the password, so this
+    // path must go through describeLoginFailure (which truncates/redacts) and
+    // not surface a raw KiaApiError on the login page.
+    const kv = stubKv();
+    stubGlobalFetch([{ body: { status: FAIL } }]);
+
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/Could not sign in to Kia/);
+    // Nothing was stashed, because nothing was sent.
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('never lets the submitted password reach the login page in an error', async () => {
+    const kv = stubKv();
+    // A hostile/naive upstream echoing the request straight back at us.
+    stubGlobalFetch([
+      {
+        body: {
+          status: { ...FAIL, errorMessage: `rejected for userCredential.password=${CREDS.password}` },
+        },
+      },
+    ]);
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv)).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain(CREDS.password);
+    expect((err as Error).message).toContain('[redacted]');
+  });
+
+  it('scrubs the minted token too, not just the password', async () => {
+    // verifiedProps runs after a successful verifyOTP, so an upstream echo at
+    // that point could carry the remember-me token — a full MFA bypass.
+    const kv = stubKv();
+    kv.store.set('mfa:driver@example.test', JSON.stringify({ otpKey: 'k', xid: 'x' }));
+    stubGlobalFetch([
+      { headers: { sid: 's', rmtoken: 'fake-rmtoken' }, body: { status: OK } },
+      { body: { status: { ...FAIL, errorMessage: 'upstream echoed fake-rmtoken back' } } },
+    ]);
+
+    const err = await kiaAuth.login({ ...CREDS, otp: '038291' }, envWith(kv)).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain('fake-rmtoken');
+  });
+
+  it('sanitizes a failure while dispatching the code', async () => {
+    const kv = stubKv();
+    stubGlobalFetch([
+      { headers: { xid: 'x' }, body: { status: OK, payload: { otpKey: 'k', nextAction: 'MFA_REQUIRED' } } },
+      { body: { status: FAIL } },
+    ]);
+    await expect(kiaAuth.login({ ...CREDS, otp: '' }, envWith(kv))).rejects.toThrow(/Could not sign in to Kia/);
+    // The stash is only written AFTER a successful send, so a failed dispatch
+    // must not leave handles behind for a code that was never delivered.
+    expect(kv.store.size).toBe(0);
+  });
+
   it('surfaces the masked destination so the user knows where to look', async () => {
     const kv = stubKv();
     stubGlobalFetch([

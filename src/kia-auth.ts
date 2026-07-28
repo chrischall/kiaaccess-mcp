@@ -133,12 +133,25 @@ export function buildHostedKiaClient(props: KiaProps): KiaClient {
  * (`truncateErrorMessage`) before it is shown, because Kia error bodies are
  * echoed verbatim and the request that produced them carried a password.
  */
-function describeLoginFailure(err: unknown): Error {
-  const raw = err instanceof Error ? err.message : String(err);
+function describeLoginFailure(err: unknown, ...secrets: string[]): Error {
+  let raw = err instanceof Error ? err.message : String(err);
+  // `truncateErrorMessage` redacts known secret SHAPES (Bearer, JWT, sk-…). A
+  // password is not a recognisable shape, and Kia's error bodies can echo the
+  // request that carried it — so scrub the literal values we know we just sent
+  // before any of this reaches the login page. Belt and braces: the generic
+  // redactor still runs afterwards for anything token-shaped.
+  for (const secret of secrets) {
+    // Guard, not decoration: `split('')` on an empty needle splits EVERY
+    // character, which would splice the placeholder through the whole message.
+    // Unreachable from the current call sites (all four pass values already
+    // validated non-empty), but load-bearing the moment one passes an optional.
+    /* v8 ignore next */
+    if (secret) raw = raw.split(secret).join('[redacted]');
+  }
   return new Error(
-    `Could not sign in to Kia: ${truncateErrorMessage(raw)} — check the email and password, and that the code ` +
-      'matches the most recent text. Codes expire after about two minutes; clear the code box and submit again ' +
-      'to have a fresh one sent.',
+    `Could not sign in to Kia: ${truncateErrorMessage(raw)} — check the email and password. If you were entering ` +
+      'a texted code, it must be the most recent one; codes expire after about two minutes, so clear the code box ' +
+      'and submit again to have a fresh one sent.',
   );
 }
 
@@ -186,7 +199,7 @@ async function verifiedProps(props: KiaProps): Promise<KiaProps> {
   try {
     await buildHostedKiaClient(props).listVehicles();
   } catch (err) {
-    throw describeLoginFailure(err);
+    throw describeLoginFailure(err, props.password, props.rmtoken);
   }
   return props;
 }
@@ -228,7 +241,17 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
 
     // ---- Step 1: no code yet — authenticate and dispatch one. ----
     if (!otp) {
-      const started = await startLogin({ username, password }, deviceId);
+      // Wrapped individually, not as a block: the two deliberate throws below
+      // are control flow ("code sent", "no challenge"), not failures, and must
+      // reach the page verbatim. Only the API calls get sanitized — a rejected
+      // password is the commonest failure here, and Kia's error body can echo
+      // the request that carried it.
+      let started;
+      try {
+        started = await startLogin({ username, password }, deviceId);
+      } catch (err) {
+        throw describeLoginFailure(err, password);
+      }
 
       if (!started.mfaRequired) {
         // Never observed live — Kia challenged every password login during
@@ -244,7 +267,12 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
         );
       }
 
-      const sent = await sendOtp({ otpKey: started.otpKey, xid: started.xid, notifyType: 'SMS' }, deviceId);
+      let sent;
+      try {
+        sent = await sendOtp({ otpKey: started.otpKey, xid: started.xid, notifyType: 'SMS' }, deviceId);
+      } catch (err) {
+        throw describeLoginFailure(err, password);
+      }
       await kv.put(stashKey, JSON.stringify({ otpKey: started.otpKey, xid: started.xid }), {
         expirationTtl: 600,
       });
@@ -271,7 +299,7 @@ export const kiaAuth: ConnectorAuth<KiaProps> = {
     try {
       ({ rmtoken } = await verifyOtp({ otpKey, xid, otp }, deviceId));
     } catch (err) {
-      throw describeLoginFailure(err);
+      throw describeLoginFailure(err, password, otp);
     }
     // One-shot: a consumed code must not be replayable.
     await kv.delete(stashKey);

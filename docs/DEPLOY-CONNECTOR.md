@@ -197,12 +197,14 @@ deploying Cloudflare account; if it isn't, remove the `routes` entry and use the
    `/authorize`), which asks for three things:
    - **Kia Owners email**
    - **Kia Owners password**
-   - **Texted code** — left blank on the first submit; filled in on the second
-     (see the two-submission flow above). Formerly a remember-me token from
-     own local stdio server, after completing the one-time MFA login there.
-4. The page does not just accept the inputs: it refreshes a real session from the
-   token and reads the vehicle list. A wrong value comes back as an error on the
-   form, not as a broken connector.
+   - **Texted code** — left blank on the first submit, then filled in on the
+     second (see the two-submission flow above). This replaces the remember-me
+     token the form used to ask for: the connector now mints one itself, so no
+     local stdio server is involved.
+4. The page does not just accept the inputs: it refreshes a real session from
+   the token it just minted and reads the vehicle list. Anything wrong — bad
+   password, wrong or expired code, unenrolled account — comes back as an error
+   on the form rather than as a connector that fails later.
 
 The connector is unlisted — it appears only for people you share the URL with.
 Anyone with the URL who completes their own Kia login uses it under their own
