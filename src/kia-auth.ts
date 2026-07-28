@@ -208,6 +208,15 @@ async function verifiedProps(props: KiaProps): Promise<KiaProps> {
 export const kiaAuth: ConnectorAuth<KiaProps> = {
   service: 'Kia Access',
   accent: '#05141F',
+  // Submit 1 is REJECTED on purpose — that rejection is how Kia is asked to
+  // text a code. Without this, that rejection reloads the page and wipes the
+  // email and password the user has to send again alongside the code; with it
+  // the error renders inline and they type only the code.
+  //
+  // Progressive enhancement: the form keeps `method="post"`, so a browser with
+  // JavaScript disabled — or a strict CSP that blocks the inline script — still
+  // gets the original full-page flow, just with the retyping.
+  preserveFieldsOnError: true,
   privacyNote:
     'Your Kia email and password are stored encrypted and used only to control your own vehicle. Signing in here ' +
     'completes Kia\'s one-time SMS verification and keeps the remember-me token it returns, so you are not asked ' +

@@ -92,6 +92,16 @@ describe('Kia Cloudflare connector — OAuth surface', () => {
     // Pin the actual field — a bare /code/i would still pass if the input were
     // removed entirely, since the surrounding copy mentions codes.
     expect(html).toMatch(/name=["']otp["']/);
+    // The multi-step enhancement must actually reach the served page: submit 1
+    // is rejected BY DESIGN (that is how Kia is asked to text a code), and
+    // without this the reload wipes the credentials the user must resend with
+    // it. Assert the wiring, not just the flag on the auth object.
+    expect(html).toContain('x-connector-ajax');
+    expect(html).toContain('id="cx-error"');
+    // …and that the no-JS path is intact, since a strict CSP would block the
+    // script and the plain POST is the only thing left.
+    expect(html).toContain('<form method="post">');
+
     // Only the password is masked; the single-use code stays readable.
     expect(html.match(/type="password"/g)).toHaveLength(1);
     // The consent text must admit the password is stored, not just checked.
