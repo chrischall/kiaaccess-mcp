@@ -122,7 +122,7 @@ Two more rules hold for every command:
 | `kia_send_otp` | Step 2 — delivers the passcode by `SMS` or `EMAIL`. |
 | `kia_verify_otp` | Step 3 — exchanges the passcode for a stored session. Returns no secret. |
 | `kia_forget_session` | Discards the stored token so the bootstrap can be re-run. Local only; confirm-gated. |
-| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a session into the hosted connector. Confirm-gated. |
+| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a locally-bootstrapped session into a hosted deployment. Confirm-gated. |
 
 ### Reads
 
@@ -148,17 +148,12 @@ Two more rules hold for every command:
 
 Every endpoint here was verified live against a 2024 EV9 — the reads and the four door/climate commands on 2026-07-27, and the three `evc/*` charging commands on 2026-07-28 against a plugged-in car. Each was proven by re-reading state, never by the success status: Kia answers `statusCode: 0` the moment it accepts a command, seconds before the car acts, and on an unplugged car it answers success and does nothing at all. Every command result therefore reports "accepted" and "confirmed" separately. The full protocol write-up is in [`docs/KIA-API.md`](docs/KIA-API.md).
 
-## Hosted connector
-
-The same tools can run as a Cloudflare Worker for use as a remote connector on [claude.ai](https://claude.ai). Sign in with your Kia email and password on the connector's own login page: submit once to have Kia text you a code, then submit again with the code. The connector completes the verification itself and keeps the resulting remember-me token in your encrypted credentials, so it never asks again — you do not need the local server, and you never handle a token. See [`docs/DEPLOY-CONNECTOR.md`](docs/DEPLOY-CONNECTOR.md).
-
 ## Development
 
 ```bash
 npm test              # unit tests (no network — fetch is mocked throughout)
 npm run test:coverage # the same, with the enforced 100% thresholds
 npm run build         # tsc + esbuild bundle
-npm run worker:test   # the hosted-connector suite, under the Workers runtime
 ```
 
 ## License

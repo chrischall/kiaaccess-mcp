@@ -9,7 +9,7 @@
  *
  * Everything is injectable ({@link ResolveDeviceIdOptions}) so tests never touch
  * the real filesystem, and nothing here runs at module load — the Cloudflare
- * Worker runtime has no filesystem and forbids random-value generation in
+ * A sandboxed runtime may have no filesystem and forbid random-value generation in
  * global scope.
  */
 

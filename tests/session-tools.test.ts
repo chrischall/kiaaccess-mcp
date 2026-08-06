@@ -1,6 +1,6 @@
 /**
  * Tests for the account/session tools — the one-time MFA bootstrap plus the
- * refresh-token export the hosted connector needs.
+ * refresh-token export a hosted deployment needs.
  *
  * The Kia client is a stub: nothing here touches the network, and every fixture
  * is an obvious fake (no real email, device id, otp key, sid or rmtoken).

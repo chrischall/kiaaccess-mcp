@@ -53,7 +53,7 @@ The remember-me token is then stored locally and refreshes sessions silently for
 | `kia_session_status` | Configured? Bootstrapped? Which write mode? No network call, no secrets. Start here when a tool says it is not configured. |
 | `kia_start_login` / `kia_send_otp` / `kia_verify_otp` | The three bootstrap steps above. |
 | `kia_forget_session(confirm)` | Deletes the locally stored session. Local only — Kia is not contacted. |
-| `kia_export_refresh_token(confirm)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a session into the hosted connector. Never call it to "check the session"; use `kia_session_status`. |
+| `kia_export_refresh_token(confirm)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a locally-bootstrapped session into a hosted deployment. Never call it to "check the session"; use `kia_session_status`. |
 
 ### Reads
 | Tool | Notes |

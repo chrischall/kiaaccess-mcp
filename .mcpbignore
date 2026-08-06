@@ -22,18 +22,9 @@ dist/*
 
 # Build config / dev tooling
 tsconfig.json
-tsconfig.worker.json
 vitest.config.ts
-vitest.workers.config.ts
 package-lock.json
 esbuild.config.*
-
-# Hosted Cloudflare connector — a separate deployment target entirely. None of
-# it is part of the desktop .mcpb, which runs dist/bundle.js over stdio.
-wrangler.jsonc
-.wrangler/
-.dev.vars
-.dev.vars.*
 
 # Reports & build artifacts
 coverage/
@@ -54,7 +45,6 @@ server.json
 .mcp.json
 SKILL.md
 skills/
-
 
 # Repo-local maintenance scripts
 scripts/
