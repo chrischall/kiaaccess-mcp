@@ -13,22 +13,12 @@ export default defineConfig({
       // without this every test file gets collected twice.
       '**/.claude/**',
       '**/worktrees/**',
-      // The hosted-connector suites run ONLY under the Workers runtime pool
-      // (`vitest.workers.config.ts` / `npm run worker:test`), which supplies the
-      // virtual `cloudflare:test` and `cloudflare:workers` modules they and
-      // `src/worker.ts` depend on. They cannot load under Node at all.
-      'tests/worker*.test.ts',
     ],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: [
         'src/index.ts', // stdio entry point — not unit-testable
-        // Worker-only entry point: imports @chrischall/mcp-connector →
-        // agents/mcp → cloudflare:workers, none of which resolve under the node
-        // pool. It is exercised by the Workers pool suite instead
-        // (tests/worker.test.ts via `npm run worker:test`).
-        'src/worker.ts',
       ],
       thresholds: {
         lines: 100,

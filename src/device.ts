@@ -8,8 +8,8 @@
  * with the same hardened perms the session store uses (0600 file, 0700 dir).
  *
  * Everything is injectable ({@link ResolveDeviceIdOptions}) so tests never touch
- * the real filesystem, and nothing here runs at module load — the Cloudflare
- * Worker runtime has no filesystem and forbids random-value generation in
+ * the real filesystem, and nothing here runs at module load — a sandboxed
+ * runtime may have no filesystem and may forbid random-value generation in
  * global scope.
  */
 

@@ -50,7 +50,7 @@ import {
 } from './protocol.js';
 import { type KiaSessionIO, SidManager, diskSessionIO } from './session.js';
 
-// Load `.env` for local dev. The try/catch guards the Cloudflare Worker
+// Load `.env` for local dev. The try/catch guards a non-Node
 // runtime, where `import.meta.url` is undefined and `fileURLToPath(undefined)`
 // would throw during startup validation — there is no filesystem or `.env`
 // there anyway.
@@ -460,8 +460,8 @@ export class KiaClient {
   }
 
   /**
-   * The remember-me token, for a caller that must persist it elsewhere (the
-   * hosted connector stores it in the user's encrypted OAuth props).
+   * The remember-me token, for a caller that must persist it elsewhere (a
+   * hosted deployment stores it with the user's other credentials).
    *
    * **Secret.** Never return this from an MCP tool — it is a full MFA bypass.
    */

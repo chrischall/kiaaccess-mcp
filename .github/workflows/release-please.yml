@@ -54,22 +54,3 @@ jobs:
           tag-name: ${{ needs.release-please.outputs.tag_name }}
           clawhub-token: ${{ secrets.CLAWHUB_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  # The hosted Cloudflare connector (src/worker.ts + wrangler.jsonc), deployed
-  # from the release tag so the Worker and the published package never drift.
-  # On-demand redeploys go through .github/workflows/deploy-connector.yml.
-  # An absent CLOUDFLARE_* secret is not fatal — the reusable workflow warns and
-  # skips rather than failing the release. See docs/DEPLOY-CONNECTOR.md.
-  deploy-connector:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    # Scoped down from the workflow-level contents:write/pull-requests:write
-    # that release-please needs; deploying only reads the tree.
-    permissions:
-      contents: read
-    uses: chrischall/workflows/.github/workflows/reusable-mcp-connector-deploy.yml@main
-    with:
-      ref: ${{ needs.release-please.outputs.tag_name }}
-    secrets:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
