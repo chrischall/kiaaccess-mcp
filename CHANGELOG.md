@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.5.0...v0.5.1) (2026-08-07)
+
+
+### Refactor
+
+* **connector:** retire the standalone Cloudflare Worker connector ([#34](https://github.com/chrischall/kiaaccess-mcp/issues/34)) ([8bd6ad2](https://github.com/chrischall/kiaaccess-mcp/commit/8bd6ad29a9ded3998b35edfae1c7190e3aebca62))
+
 ## [0.5.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.4.1...v0.5.0) (2026-07-28)
 
 
