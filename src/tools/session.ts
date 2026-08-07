@@ -27,7 +27,7 @@
  *     a decision.
  *  2. **No tool returns a `sid` or an `rmtoken`** — except
  *     {@link registerSessionTools}'s explicit, confirm-gated export, which
- *     exists solely so the hosted Cloudflare connector can persist the token
+ *     exists solely so a hosted deployment can persist the token
  *     into the user's encrypted OAuth props. `KiaClient.completeLogin()`
  *     deliberately returns no secret, so the normal bootstrap can never echo
  *     one into a transcript.

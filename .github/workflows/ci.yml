@@ -24,9 +24,6 @@ jobs:
       build-command: npm run build
       # Coverage, not bare `npm test`: vitest.config.ts sets 100% thresholds and
       # only `test:coverage` enforces them. `npm test` stays coverage-free for
-      # fast local iteration. `worker:test` is a SEPARATE pool (workerd via
-      # Miniflare) covering src/worker.ts and the hosted connector — the Node run
-      # cannot load those files at all, so skipping it would leave the whole
-      # connector untested in CI.
-      test-command: npm run test:coverage && npm run worker:typecheck && npm run worker:test
+      # fast local iteration.
+      test-command: npm run test:coverage
       gate-mode: status

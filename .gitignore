@@ -7,9 +7,6 @@ coverage/
 *.tsbuildinfo
 .claude/worktrees/
 
-# encrypted OAuth props (i.e. someone's Kia credentials).
-.dev.vars.*
-
 # Network captures — routinely carry session cookies and auth headers even
 # when nominally "sanitized". Shapes belong in docs/KIA-API.md; captures never
 # get committed.

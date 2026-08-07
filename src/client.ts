@@ -460,8 +460,8 @@ export class KiaClient {
   }
 
   /**
-   * The remember-me token, for a caller that must persist it elsewhere (the
-   * a hosted deployment stores it with the user's other credentials).
+   * The remember-me token, for a caller that must persist it elsewhere (a
+   * hosted deployment stores it with the user's other credentials).
    *
    * **Secret.** Never return this from an MCP tool — it is a full MFA bypass.
    */
