@@ -109,7 +109,7 @@ export function createSessionIO(openStore: () => SessionStore<KiaStoredSession>)
 /** Disk-backed session persistence (0600 file, 0700 dir). Never throws. */
 export const diskSessionIO: KiaSessionIO = createSessionIO(openSessionStore);
 
-/** No-op persistence for runtimes without a filesystem (Cloudflare Workers). */
+/** No-op persistence for runtimes without a filesystem. */
 export const nullSessionIO: KiaSessionIO = {
   load: () => null,
   save: () => {},

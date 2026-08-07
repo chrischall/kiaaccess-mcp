@@ -310,8 +310,8 @@ export interface KiaRequestInit {
 /**
  * Injectable fetch. Note the call site in {@link defaultFetch}: `fetch` must be
  * invoked as a method of `globalThis`, never stored detached — a detached
- * `globalThis.fetch` throws `Illegal invocation` in the Cloudflare Workers
- * runtime while passing every Node test.
+ * `globalThis.fetch` throws `Illegal invocation` in sandboxed runtimes while
+ * passing every Node test.
  */
 export type FetchLike = (url: string, init: KiaRequestInit) => Promise<Response>;
 
