@@ -8,8 +8,8 @@
  *    I/O, so the server boots (and answers `tools/list`) with no credentials
  *    configured; the error surfaces on the first request instead. The
  *    constructor is also PURE — no fetch, no randomness, no timers — because
- *    the Cloudflare Workers runtime forbids those in global scope, where a
- *    module-level singleton is constructed.
+ *    sandboxed runtimes forbid those in global scope, where a module-level
+ *    singleton is constructed.
  *  - **One read path, one write path.** Every read goes through the private
  *    `request()` and every mutation through the private `command()`, so
  *    headers, the session-expiry replay and the success check can never drift
@@ -344,8 +344,8 @@ export class KiaClient {
   private readonly sessionIO: KiaSessionIO;
 
   // Lazily-resolved state. NOTHING is computed in the constructor: the module
-  // singleton is built in Workers global scope, where I/O, randomness and
-  // timers are forbidden.
+  // singleton is built in global scope, where sandboxed runtimes forbid I/O,
+  // randomness and timers.
   private credentialsResolved = false;
   private configError: McpToolError | undefined;
   private credentials: KiaCredentials | undefined;
