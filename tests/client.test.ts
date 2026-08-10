@@ -153,6 +153,7 @@ describe('sid minting', () => {
   afterEach(() => {
     delete process.env.KIA_USERNAME;
     delete process.env.KIA_PASSWORD;
+    delete process.env.KIA_RMTOKEN;
   });
 
   it('mints a sid from the rmtoken before the first read, then reuses it', async () => {
@@ -203,6 +204,42 @@ describe('sid minting', () => {
     await client.listVehicles();
 
     expect(calls[0].init.headers.rmtoken).toBe('fake-rmtoken-from-disk');
+  });
+
+  it('loads the rmtoken from KIA_RMTOKEN when none is injected (the hosted path)', async () => {
+    process.env.KIA_RMTOKEN = 'fake-rmtoken-from-env';
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
+    const client = makeClient(fetchImpl, { rmtoken: undefined });
+
+    await client.listVehicles();
+
+    expect(calls[0].init.headers.rmtoken).toBe('fake-rmtoken-from-env');
+  });
+
+  it('prefers KIA_RMTOKEN over a token on disk, so the host is not overridden by stale state', async () => {
+    process.env.KIA_RMTOKEN = 'fake-rmtoken-from-env';
+    const io = memoryIO({
+      accountId: 'driver@example.test',
+      rmtoken: 'fake-rmtoken-from-disk',
+      deviceId: DEVICE_ID,
+      updatedAt: '2026-07-27T19:00:00.000Z',
+    });
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
+    const client = makeClient(fetchImpl, { rmtoken: undefined, sessionIO: io });
+
+    await client.listVehicles();
+
+    expect(calls[0].init.headers.rmtoken).toBe('fake-rmtoken-from-env');
+  });
+
+  it('still prefers an explicitly injected rmtoken over KIA_RMTOKEN', async () => {
+    process.env.KIA_RMTOKEN = 'fake-rmtoken-from-env';
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
+    const client = makeClient(fetchImpl);
+
+    await client.listVehicles();
+
+    expect(calls[0].init.headers.rmtoken).toBe(RMTOKEN);
   });
 
   it('asks for the MFA bootstrap when there is no rmtoken anywhere', async () => {

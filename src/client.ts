@@ -312,7 +312,7 @@ export interface KiaClientOptions {
   username?: string;
   /** Overrides `KIA_PASSWORD`. */
   password?: string;
-  /** Pre-bootstrapped remember-me token; skips the session store entirely. */
+  /** Pre-bootstrapped remember-me token; overrides `KIA_RMTOKEN` and the store. */
   rmtoken?: string;
   /** Overrides the persisted/`KIA_DEVICE_ID` device uuid. */
   deviceId?: string;
@@ -433,7 +433,8 @@ export class KiaClient {
 
   private loadRmToken(): string | null {
     if (this.cachedRmToken === undefined) {
-      this.cachedRmToken = this.opts.rmtoken ?? this.sessionIO.load(this.accountId)?.rmtoken ?? null;
+      this.cachedRmToken =
+        this.opts.rmtoken ?? readEnvVar('KIA_RMTOKEN') ?? this.sessionIO.load(this.accountId)?.rmtoken ?? null;
     }
     return this.cachedRmToken;
   }
@@ -446,7 +447,9 @@ export class KiaClient {
         {
           hint:
             'Run the login bootstrap once (start login → send OTP → verify OTP). The resulting remember-me ' +
-            'token is stored locally and re-used indefinitely, so MFA is not needed again.',
+            'token is stored locally and re-used indefinitely, so MFA is not needed again. Where no OTP can ' +
+            'be read (a hosted deployment), bootstrap elsewhere and pass that token as KIA_RMTOKEN, with ' +
+            'KIA_DEVICE_ID set to the device uuid it was minted against.',
         },
       );
     }

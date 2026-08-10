@@ -43,6 +43,8 @@ Kia challenges each new device once. Start with `kia_session_status`; if it repo
 
 The remember-me token is then stored locally and refreshes sessions silently forever; MFA is never needed again on that machine. `kia_forget_session` (confirm-gated) throws it away so the bootstrap can be repeated.
 
+A server with no one to read an OTP cannot run these steps at all. Bootstrap it elsewhere and pass the exported token as `KIA_RMTOKEN`, with `KIA_DEVICE_ID` set to the same uuid on both machines — the token is minted against a device uuid and is worthless with a different one. `KIA_RMTOKEN` wins over the local store.
+
 **If a login is rejected, STOP.** Kia counts failed logins and eventually enforces reCAPTCHA, which breaks server-side login for that account permanently. Tell the user to check the credentials in the Kia Access app and fix the environment — never retry with a guessed password.
 
 ## Tools
@@ -53,7 +55,7 @@ The remember-me token is then stored locally and refreshes sessions silently for
 | `kia_session_status` | Configured? Bootstrapped? Which write mode? No network call, no secrets. Start here when a tool says it is not configured. |
 | `kia_start_login` / `kia_send_otp` / `kia_verify_otp` | The three bootstrap steps above. |
 | `kia_forget_session(confirm)` | Deletes the locally stored session. Local only — Kia is not contacted. |
-| `kia_export_refresh_token(confirm)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a locally-bootstrapped session into a hosted deployment. Never call it to "check the session"; use `kia_session_status`. |
+| `kia_export_refresh_token(confirm)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a locally-bootstrapped session into a deployment that cannot bootstrap itself, via `KIA_RMTOKEN`. Never call it to "check the session"; use `kia_session_status`. |
 
 ### Reads
 | Tool | Notes |
