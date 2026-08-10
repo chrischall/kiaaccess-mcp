@@ -7,6 +7,9 @@
  *     the account it belongs to) survives restarts in a 0600 file inside a 0700
  *     directory, so the MFA bootstrap is a one-time cost. `sid`s are NOT
  *     persisted: they are short-lived and cheap to re-mint from the `rmtoken`.
+ *     A deployment that cannot run the bootstrap at all — nowhere to read an
+ *     OTP — supplies a token minted elsewhere as `KIA_RMTOKEN` instead, which
+ *     takes precedence over this store (see `KiaClient.loadRmToken`).
  *  2. **Minting** — {@link SidManager} wraps `TokenManager` so a burst of
  *     concurrent tool calls coalesces onto ONE `prof/authUser` refresh, and a
  *     call that reports an expired session triggers exactly one re-mint and

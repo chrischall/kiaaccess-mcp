@@ -51,7 +51,8 @@ npm run build
 
 ```bash
 cp .env.example .env
-# Edit .env: KIA_USERNAME, KIA_PASSWORD (and optionally KIA_WRITE_MODE)
+# Edit .env: KIA_USERNAME, KIA_PASSWORD (and optionally KIA_WRITE_MODE,
+#            KIA_DEVICE_ID, KIA_RMTOKEN — see .env.example)
 ```
 
 `.env` is gitignored. The server never logs credentials, and no tool ever returns your password.
@@ -90,6 +91,16 @@ Run it through Claude, in this order:
 
 To start over (revoked token, changed password, handing the machine on), run **`kia_forget_session`** with `confirm: true` and repeat from step 2.
 
+### Running it somewhere with no phone to read
+
+The bootstrap needs a human once. A deployment that has no one to read an OTP — a remote host — cannot run it at all, so bootstrap on a machine that can and move the token:
+
+1. Set `KIA_DEVICE_ID` to a fixed uuid **before** the bootstrap, on both machines. The `rmtoken` is minted against a device uuid and is worthless with a different one, and `kia_session_status` only ever reports a truncated prefix — so if you let it be generated, you cannot read back the value you need.
+2. Bootstrap as above, then run `kia_export_refresh_token` with `confirm: true`.
+3. Give the remote deployment that value as `KIA_RMTOKEN`, alongside `KIA_USERNAME`, `KIA_PASSWORD` and the same `KIA_DEVICE_ID`.
+
+`KIA_RMTOKEN` takes precedence over anything in the local session store, so the deployment's session is whatever you handed it rather than whatever it last wrote. Treat the value like the password it stands in for: it bypasses MFA, and with the account password it grants full control of the vehicle.
+
 ### If login fails
 
 Do not retry. Kia increments `loginAttempt` on every rejection and eventually sets `enforceRecaptcha`, which breaks server-side login for that account permanently. Verify the email and password in the Kia Access app first, fix `.env`, restart, and only then try again.
@@ -122,7 +133,7 @@ Two more rules hold for every command:
 | `kia_send_otp` | Step 2 — delivers the passcode by `SMS` or `EMAIL`. |
 | `kia_verify_otp` | Step 3 — exchanges the passcode for a stored session. Returns no secret. |
 | `kia_forget_session` | Discards the stored token so the bootstrap can be re-run. Local only; confirm-gated. |
-| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a locally-bootstrapped session into a hosted deployment. Confirm-gated. |
+| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a locally-bootstrapped session into a deployment that cannot run the bootstrap itself, via `KIA_RMTOKEN`. Confirm-gated. |
 
 ### Reads
 
