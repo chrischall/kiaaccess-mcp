@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.5.1...v0.6.0) (2026-08-10)
+
+
+### Features
+
+* **session:** accept a bootstrapped rmtoken via KIA_RMTOKEN ([#40](https://github.com/chrischall/kiaaccess-mcp/issues/40)) ([5b3336a](https://github.com/chrischall/kiaaccess-mcp/commit/5b3336a57b86f4c114112f227c68ee8c29947321))
+
 ## [0.5.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.5.0...v0.5.1) (2026-08-07)
 
 
