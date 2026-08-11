@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "kiaaccess-mcp",
   "display_name": "Kia Access",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Kia Access vehicle tools — status, location, doors, climate, and charging",
   "long_description": "Talks to the Kia Owners API the Kia Access mobile app uses, authenticating with your own Kia account email and password. Read tools cover the vehicle list, cached and force-refreshed status, location, odometer, and EV charge state. Every command that acts on the vehicle — door lock/unlock, climate start/stop, charge start/stop, charge limits — is confirm-gated: without an explicit confirm it makes no network call and returns a dry-run preview of exactly what would be sent.",
   "author": {
