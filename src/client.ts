@@ -473,11 +473,19 @@ export class KiaClient {
     return this.loadRmToken();
   }
 
-  /** Forget the stored session; the next call needs a fresh MFA bootstrap. */
+  /**
+   * Forget the stored session; the next call needs a fresh MFA bootstrap.
+   *
+   * Only the local record is forgotten. An injected `rmtoken` or `KIA_RMTOKEN`
+   * is host configuration, not stored state, and this cannot delete it — so the
+   * cache is invalidated rather than pinned to `null`, letting the next read
+   * resolve whatever source still supplies a token. Pinning it hid a valid
+   * `KIA_RMTOKEN` until the process restarted.
+   */
   forgetSession(): void {
     if (!this.isConfigured()) return;
     this.sessionIO.clear(this.accountId);
-    this.cachedRmToken = null;
+    this.cachedRmToken = undefined;
     this.cachedSids = undefined;
   }
 

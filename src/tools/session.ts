@@ -395,14 +395,21 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
       }
 
       client.forgetSession();
+      // A token injected at construction or via KIA_RMTOKEN is host config the
+      // local delete cannot reach, so the session can outlive the forget. Say
+      // so rather than reporting a bootstrap that is not actually needed.
+      const sessionRemains = client.describeConfig().hasSession;
       return jsonResult({
         forgotten: true,
         account,
         hadStoredSession: config.hasSession,
+        sessionRemains,
         note: 'Local only — Kia was not contacted, and the token is not returned.',
-        nextStep:
-          'Run the one-time MFA bootstrap again when you next need the vehicle: kia_start_login, then kia_send_otp, ' +
-          'then kia_verify_otp.',
+        nextStep: sessionRemains
+          ? 'The stored record is gone, but a token supplied by the host (an injected rmtoken or KIA_RMTOKEN) is ' +
+            'still in effect, so no MFA bootstrap is needed. Unset it at the host to fully sign out.'
+          : 'Run the one-time MFA bootstrap again when you next need the vehicle: kia_start_login, then kia_send_otp, ' +
+            'then kia_verify_otp.',
       });
     },
   );
