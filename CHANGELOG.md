@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.6.0...v0.6.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **session:** stop kia_forget_session hiding a valid KIA_RMTOKEN ([#43](https://github.com/chrischall/kiaaccess-mcp/issues/43)) ([639a90e](https://github.com/chrischall/kiaaccess-mcp/commit/639a90ef8f00f94c2846ed336ed6fc95b7e9ee1a)), closes [#41](https://github.com/chrischall/kiaaccess-mcp/issues/41)
+
 ## [0.6.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.5.1...v0.6.0) (2026-08-10)
 
 
