@@ -33,7 +33,7 @@ type Stub = {
 };
 
 function makeStub(): Stub {
-  return {
+  const stub: Stub = {
     describeConfig: vi.fn(() => ({
       accountId: ACCOUNT,
       deviceId: DEVICE_ID,
@@ -60,6 +60,17 @@ function makeStub(): Stub {
     exportRmToken: vi.fn(() => RMTOKEN as string | null),
     forgetSession: vi.fn(() => undefined),
   };
+  // The real client stops reporting a session once it has been forgotten;
+  // a stub that keeps saying `hasSession: true` would hide that.
+  stub.forgetSession.mockImplementation(() => {
+    stub.describeConfig.mockReturnValue({
+      accountId: ACCOUNT,
+      deviceId: DEVICE_ID,
+      configured: true,
+      hasSession: false,
+    });
+  });
+  return stub;
 }
 
 let stub: Stub;
@@ -425,10 +436,26 @@ describe('kia_forget_session', () => {
     expect(stub.forgetSession).toHaveBeenCalledTimes(1);
     expect(data.forgotten).toBe(true);
     expect(data.hadStoredSession).toBe(true);
+    expect(data.sessionRemains).toBe(false);
     expect(data.account).toBe(MASKED_ACCOUNT);
     expect(String(data.nextStep)).toContain('kia_start_login');
     // Never echoes the credential it just discarded.
     expect(textOf(result)).not.toContain(RMTOKEN);
+  });
+
+  it('says the session survives when the host still supplies a token', async () => {
+    // KIA_RMTOKEN (or an injected token) outlives the local delete, so the
+    // caller must not be sent off to redo an MFA bootstrap it does not need.
+    stub.forgetSession.mockImplementation(() => undefined);
+    await mount();
+    const data = parseToolResult<Record<string, unknown>>(
+      await harness.callTool('kia_forget_session', { confirm: true }),
+    );
+    expect(data.forgotten).toBe(true);
+    expect(data.sessionRemains).toBe(true);
+    expect(String(data.nextStep)).toContain('KIA_RMTOKEN');
+    expect(String(data.nextStep)).not.toContain('kia_start_login');
+    expect(textOf(await harness.callTool('kia_forget_session', { confirm: true }))).not.toContain(RMTOKEN);
   });
 
   it('is a no-op that says so when there was nothing stored', async () => {

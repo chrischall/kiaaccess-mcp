@@ -940,6 +940,42 @@ describe('MFA bootstrap through the client', () => {
     expect(client.exportRmToken()).toBeNull();
   });
 
+  it('re-reads KIA_RMTOKEN after forgetting, since the env var is host config not stored state', async () => {
+    process.env.KIA_RMTOKEN = 'fake-rmtoken-from-env';
+    const io = memoryIO({
+      accountId: 'driver@example.test',
+      rmtoken: RMTOKEN,
+      deviceId: DEVICE_ID,
+      updatedAt: '2026-07-27T19:00:00.000Z',
+    });
+    const { fetchImpl } = stubFetch([]);
+    const client = makeClient(fetchImpl, { rmtoken: undefined, sessionIO: io });
+
+    expect(client.exportRmToken()).toBe('fake-rmtoken-from-env');
+    client.forgetSession();
+
+    // The stored record is gone, but the host still supplies a token: the
+    // next call must see it rather than demand a fresh MFA bootstrap.
+    expect(io.load()).toBeNull();
+    expect(client.hasSession()).toBe(true);
+    expect(client.exportRmToken()).toBe('fake-rmtoken-from-env');
+  });
+
+  it('re-reads an injected rmtoken after forgetting', async () => {
+    const io = memoryIO({
+      accountId: 'driver@example.test',
+      rmtoken: 'fake-rmtoken-on-disk',
+      deviceId: DEVICE_ID,
+      updatedAt: '2026-07-27T19:00:00.000Z',
+    });
+    const { fetchImpl } = stubFetch([]);
+    const client = makeClient(fetchImpl, { sessionIO: io });
+
+    client.forgetSession();
+    expect(client.hasSession()).toBe(true);
+    expect(client.exportRmToken()).toBe(RMTOKEN);
+  });
+
   it('reports no session for an unconfigured client instead of throwing', () => {
     delete process.env.KIA_USERNAME;
     delete process.env.KIA_PASSWORD;
