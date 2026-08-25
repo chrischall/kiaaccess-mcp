@@ -1,0 +1,48 @@
+version: 1
+name: Kia Access
+slug: kiaaccess
+summary: >-
+  Kia Connect vehicle status, lock/unlock, climate and charging. Server-side
+  login with a remember-me token that skips MFA, so it hosts without a browser.
+  Writes are confirm-gated and KIA_WRITE_MODE narrows them further.
+env:
+  - name: KIA_RMTOKEN
+    secret: true
+    required: false
+    help: >-
+      The long-lived remember-me token — this is the MFA bypass, and the right
+      credential for a hosted deployment (nowhere to read an OTP). Bootstrap it
+      locally with the kia_start_login / kia_send_otp / kia_verify_otp tools,
+      then export it with kia_export_refresh_token. Takes precedence over the
+      saved session and over username/password.
+  - name: KIA_USERNAME
+    required: false
+    help: >-
+      Kia Owners account email. Only useful where the MFA bootstrap can actually
+      be completed; prefer KIA_RMTOKEN when hosted.
+  - name: KIA_PASSWORD
+    secret: true
+    required: false
+    help: Kia Owners account password. See KIA_USERNAME — prefer KIA_RMTOKEN when hosted.
+  - name: KIA_DEVICE_ID
+    required: false
+    help: >-
+      Device uuid the remember-me token is bound to. A different one needs a new
+      MFA bootstrap, so pin it alongside a transplanted KIA_RMTOKEN.
+  - name: KIA_WRITE_MODE
+    required: false
+    help: >-
+      Which mutating tools to register (e.g. none / all). Leave unset for the
+      conservative default; every write is confirm-gated regardless.
+state:
+  dataDir: true
+  reason: >-
+    Persists the remember-me token (0600, under $HOME) so the one-time MFA
+    bootstrap survives restarts. Without it every cold start needs a human to
+    complete an OTP challenge — which a hosted child cannot do, so a
+    registration without dataDir must supply KIA_RMTOKEN instead.
+egress:
+  allow:
+    # The Kia Owners API — the only host this server contacts. (The Google Maps
+    # link a location read returns is handed to the user, never fetched.)
+    - api.owners.kia.com
