@@ -1,5 +1,5 @@
 ---
-name: kiaaccess-mcp
+name: kiaaccess
 description: This skill should be used when the user asks about their Kia vehicle through the Kia Access / Kia Owners account. Triggers on phrases like "is the car locked", "unlock the Kia", "start the car's climate", "warm up the car", "where is my car", "what's the EV charge at", "check the car's battery", "lock the doors", or any request to read or command a Kia vehicle.
 ---
 
