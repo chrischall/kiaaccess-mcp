@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/chrischall/kiaaccess-mcp/compare/v0.6.1...v0.6.2) (2026-08-26)
+
+
+### Documentation
+
+* **skill:** declare the name this skill actually publishes under ([#52](https://github.com/chrischall/kiaaccess-mcp/issues/52)) ([8b8ec75](https://github.com/chrischall/kiaaccess-mcp/commit/8b8ec758f8d6392673d7ca1c2898f1f6b72aa90c))
+
 ## [0.6.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.6.0...v0.6.1) (2026-08-11)
 
 
