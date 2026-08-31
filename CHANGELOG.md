@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.6.2...v0.7.0) (2026-08-31)
+
+
+### Features
+
+* **tools:** add kia_healthcheck ([#57](https://github.com/chrischall/kiaaccess-mcp/issues/57)) ([6c796f8](https://github.com/chrischall/kiaaccess-mcp/commit/6c796f8ca225d7419c0bdc7ab50ec08e62c467bb))
+
 ## [0.6.2](https://github.com/chrischall/kiaaccess-mcp/compare/v0.6.1...v0.6.2) (2026-08-26)
 
 
