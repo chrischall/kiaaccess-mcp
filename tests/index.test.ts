@@ -49,6 +49,7 @@ const READ_ONLY_ROSTER = [
   'kia_charge_targets',
   'kia_export_refresh_token',
   'kia_forget_session',
+  'kia_healthcheck',
   'kia_list_vehicles',
   'kia_refresh_status',
   'kia_send_otp',
@@ -83,12 +84,13 @@ afterEach(() => {
 });
 
 describe('full tool surface', () => {
-  it('registers exactly 18 tools under KIA_WRITE_MODE=all', async () => {
+  it('registers exactly 19 tools under KIA_WRITE_MODE=all', async () => {
     const names = await rosterUnder('all');
     expect(names).toEqual([
       'kia_charge_targets',
       'kia_export_refresh_token',
       'kia_forget_session',
+  'kia_healthcheck',
       'kia_list_vehicles',
       'kia_lock_doors',
       'kia_refresh_status',
@@ -105,7 +107,7 @@ describe('full tool surface', () => {
       'kia_vehicle_status',
       'kia_verify_otp',
     ]);
-    expect(names).toHaveLength(18);
+    expect(names).toHaveLength(19);
   });
 
   it('namespaces every tool under `kia_`', async () => {

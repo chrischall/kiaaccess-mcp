@@ -15,6 +15,7 @@ import type { ToolRegistrar } from '@chrischall/mcp-utils';
 import type { KiaClient } from './client.js';
 import { registerChargingTools } from './tools/charging.js';
 import { registerCommandsTools } from './tools/commands.js';
+import { registerHealthcheckTools } from './tools/healthcheck.js';
 import { registerSessionTools } from './tools/session.js';
 import { registerVehiclesTools } from './tools/vehicles.js';
 
@@ -28,6 +29,7 @@ import { registerVehiclesTools } from './tools/vehicles.js';
  * invoked by any host setting or injected instruction.
  */
 export const TOOL_REGISTRARS: ToolRegistrar<KiaClient>[] = [
+  registerHealthcheckTools,
   registerSessionTools,
   registerVehiclesTools,
   registerCommandsTools,
