@@ -90,7 +90,7 @@ describe('full tool surface', () => {
       'kia_charge_targets',
       'kia_export_refresh_token',
       'kia_forget_session',
-  'kia_healthcheck',
+      'kia_healthcheck',
       'kia_list_vehicles',
       'kia_lock_doors',
       'kia_refresh_status',
