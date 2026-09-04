@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.7.0...v0.8.0) (2026-09-04)
+
+
+### Features
+
+* **tools:** minify every response ([#70](https://github.com/chrischall/kiaaccess-mcp/issues/70)) ([d827267](https://github.com/chrischall/kiaaccess-mcp/commit/d827267718e26c876a0479bf3eb702990eec1848))
+
 ## [0.7.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.6.2...v0.7.0) (2026-08-31)
 
 

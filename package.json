@@ -1,6 +1,6 @@
 {
   "name": "kiaaccess-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "MIT",
   "mcpName": "io.github.chrischall/kiaaccess-mcp",
   "description": "Kia Access MCP server for Claude — developed and maintained by AI (Claude Code)",
