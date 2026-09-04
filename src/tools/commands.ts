@@ -22,7 +22,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { McpToolError, SafePathSegment, jsonResult, readEnvVar, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
+import { McpToolError, SafePathSegment, minifiedResult, readEnvVar, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import { z } from 'zod';
 import {
   type KiaClient,
@@ -192,7 +192,7 @@ function previewCommand(plan: CommandPlan, vinKey: string): CallToolResult {
   // Widened to `CommandSpec`: the `as const` literal type drops `note` from the
   // entries that don't carry one.
   const spec: CommandSpec = COMMAND_SPECS[plan.command];
-  return jsonResult({
+  return minifiedResult({
     dryRun: true,
     action: plan.action,
     command: plan.command,
@@ -240,7 +240,7 @@ async function runCommand(
     { baseline, timeoutMs: waitSeconds * 1000 },
   );
 
-  return jsonResult({
+  return minifiedResult({
     action: plan.action,
     command: plan.command,
     method: result.method,

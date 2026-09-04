@@ -36,7 +36,7 @@
  *     account/device is wired up, not enough to be worth exfiltrating.
  */
 
-import { McpToolError, jsonResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
+import { McpToolError, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { KiaClient } from '../client.js';
@@ -130,7 +130,7 @@ export function registerSessionStatusTool(server: McpServer, client: KiaSessionC
     },
     async () => {
       const config = client.describeConfig();
-      return jsonResult({
+      return minifiedResult({
         configured: config.configured,
         account: maskAccountId(config.accountId),
         hasSession: config.hasSession,
@@ -174,7 +174,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
     async ({ confirm }) => {
       const account = maskAccountId(client.describeConfig().accountId);
       if (confirm !== true) {
-        return jsonResult({
+        return minifiedResult({
           dryRun: true,
           action: `Start the Kia MFA bootstrap for ${account ?? 'the configured account'}`,
           method: 'POST',
@@ -197,7 +197,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
       }
 
       const login = await client.beginLogin();
-      return jsonResult({
+      return minifiedResult({
         started: true,
         account,
         mfaRequired: login.mfaRequired,
@@ -241,7 +241,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
     },
     async ({ otpKey, xid, notifyType }) => {
       const sent = await client.sendLoginOtp({ otpKey, xid, notifyType });
-      return jsonResult({
+      return minifiedResult({
         sent: true,
         notifyType,
         message: sent.message,
@@ -284,7 +284,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
     },
     async ({ otpKey, xid, otp }) => {
       const done = await client.completeLogin({ otpKey, xid, otp });
-      return jsonResult({
+      return minifiedResult({
         verified: true,
         account: maskAccountId(done.accountId),
         deviceIdPrefix: maskDeviceId(done.deviceId),
@@ -322,7 +322,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
       const config = client.describeConfig();
       const account = maskAccountId(config.accountId);
       if (confirm !== true) {
-        return jsonResult({
+        return minifiedResult({
           dryRun: true,
           action: `Return the Kia remember-me token for ${account ?? 'the configured account'}`,
           account,
@@ -350,7 +350,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         );
       }
 
-      return jsonResult({
+      return minifiedResult({
         account,
         rmtoken,
         warning:
@@ -381,7 +381,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
       const config = client.describeConfig();
       const account = maskAccountId(config.accountId);
       if (confirm !== true) {
-        return jsonResult({
+        return minifiedResult({
           dryRun: true,
           action: `Delete the stored Kia session for ${account ?? 'the configured account'}`,
           account,
@@ -399,7 +399,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
       // local delete cannot reach, so the session can outlive the forget. Say
       // so rather than reporting a bootstrap that is not actually needed.
       const sessionRemains = client.describeConfig().hasSession;
-      return jsonResult({
+      return minifiedResult({
         forgotten: true,
         account,
         hadStoredSession: config.hasSession,

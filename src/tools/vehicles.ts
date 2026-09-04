@@ -19,7 +19,7 @@
  *     explicitly labelled as useless for before/after change detection.
  */
 
-import { McpToolError, SafePathSegment, jsonResult, toolAnnotations } from '@chrischall/mcp-utils';
+import { McpToolError, SafePathSegment, minifiedResult, toolAnnotations } from '@chrischall/mcp-utils';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { extractVehicleStatus } from '../client.js';
@@ -160,7 +160,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
     },
     async () => {
       const vehicles = await client.listVehicles();
-      return jsonResult({ count: vehicles.length, vehicles: vehicles.map(summarizeVehicle) });
+      return minifiedResult({ count: vehicles.length, vehicles: vehicles.map(summarizeVehicle) });
     },
   );
 
@@ -202,7 +202,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
       }
 
       const climate = status.climate;
-      return jsonResult({
+      return minifiedResult({
         vehicleKey,
         nickName,
         doors: { locked: status.doorLock },
@@ -255,7 +255,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
     async ({ vehicle_key }) => {
       const vehicleKey = await resolveVehicleKey(client, vehicle_key);
       const envelope = await client.forceVehicleRefresh(vehicleKey);
-      return jsonResult({
+      return minifiedResult({
         vehicleKey,
         requested: true,
         status: envelope.status,
@@ -301,7 +301,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
             }
           : {};
 
-      return jsonResult({
+      return minifiedResult({
         vehicleKey,
         ...coordinates,
         location,

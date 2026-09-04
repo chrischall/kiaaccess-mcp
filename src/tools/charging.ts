@@ -20,7 +20,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { McpToolError, jsonResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
+import { McpToolError, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import { z } from 'zod';
 import type { KiaChargeTarget, KiaClient, KiaCommandResult } from '../client.js';
 import { BASE_URL, COMMAND_SPECS, type CommandSpec, ENDPOINTS, type KiaCommandName } from '../protocol.js';
@@ -98,7 +98,7 @@ function previewUnlessConfirmed(
   if (confirm === true) return null;
   // Widened to `CommandSpec` so the optional `note` is readable across the union.
   const spec: CommandSpec = COMMAND_SPECS[command];
-  return jsonResult({
+  return minifiedResult({
     dryRun: true,
     action: args.action,
     command,
@@ -163,7 +163,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
     },
     async ({ vinKey }) => {
       const targets = await client.getChargeTargets(vinKey);
-      return jsonResult({
+      return minifiedResult({
         vinKey,
         endpoint: ENDPOINTS.chargeTargets,
         targets,
@@ -212,7 +212,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       if (gate) return gate;
 
       const result = await client.startCharge(vinKey, ratio);
-      return jsonResult({
+      return minifiedResult({
         ...describeCommand(result),
         chargeRatio: ratio,
         verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
@@ -246,7 +246,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       if (gate) return gate;
 
       const result = await client.cancelCharge(vinKey);
-      return jsonResult({
+      return minifiedResult({
         ...describeCommand(result),
         verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
         hint: ACCEPTED_HINT,
@@ -302,7 +302,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
 
       if (verify === false) {
         const unchecked = await client.setChargeTargets(vinKey, targets);
-        return jsonResult({
+        return minifiedResult({
           ...describeCommand(unchecked),
           requested: targets,
           verification: { attempted: false, reason: 'Caller passed verify:false, so evc/gts was not re-read.' },
@@ -322,7 +322,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         { baseline, timeoutMs: 30_000, intervalMs: 5_000 },
       );
 
-      return jsonResult({
+      return minifiedResult({
         ...describeCommand(result),
         requested: targets,
         verification: {
