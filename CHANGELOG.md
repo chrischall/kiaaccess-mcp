@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.1](https://github.com/chrischall/kiaaccess-mcp/compare/v0.8.0...v0.8.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **deps:** @chrischall/mcp-utils 0.26.1 ([#83](https://github.com/chrischall/kiaaccess-mcp/issues/83)) ([1fa760a](https://github.com/chrischall/kiaaccess-mcp/commit/1fa760a4ec83f3ebd5f8831d95c20b1e91f76307))
+* **deps:** bump hono from 4.13.0 to 4.13.7 ([#81](https://github.com/chrischall/kiaaccess-mcp/issues/81)) ([b0df55c](https://github.com/chrischall/kiaaccess-mcp/commit/b0df55cebcdeee1b94d53f42b370711ce3fc59f7))
+* **deps:** declare the peer floors mcp-utils 0.26.1 requires ([#84](https://github.com/chrischall/kiaaccess-mcp/issues/84)) ([b5cfcce](https://github.com/chrischall/kiaaccess-mcp/commit/b5cfcce2c210c33e3715b38fec1adc0f8d715a13))
+
 ## [0.8.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.7.0...v0.8.0) (2026-09-04)
 
 
