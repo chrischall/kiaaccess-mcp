@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.8.2...v0.9.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** migrate server to SDK v2 ([#89](https://github.com/chrischall/kiaaccess-mcp/issues/89))
+
+### Features
+
+* **mcp:** migrate server to SDK v2 ([#89](https://github.com/chrischall/kiaaccess-mcp/issues/89)) ([9e5f469](https://github.com/chrischall/kiaaccess-mcp/commit/9e5f4694183b01f41a8cf7e99d439e58eb9c24b7))
+
+
+### Bug Fixes
+
+* **mcp:** restore repository source style ([#92](https://github.com/chrischall/kiaaccess-mcp/issues/92)) ([b92dcb0](https://github.com/chrischall/kiaaccess-mcp/commit/b92dcb028f6f3d19e5199ab4738b0183920a6c53))
+
 ## [0.8.2](https://github.com/chrischall/kiaaccess-mcp/compare/v0.8.1...v0.8.2) (2026-09-14)
 
 
