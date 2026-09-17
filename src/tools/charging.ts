@@ -17,27 +17,23 @@
  *     itself), and `evStatus.batteryCharge` — inside the `cmm/gvi` read that
  *     `kia_vehicle_status` performs — for start/stop charge.
  */
-import type { McpServer, CallToolResult } from "@modelcontextprotocol/server";
+import type { McpServer, CallToolResult } from '@modelcontextprotocol/server';
 import {
   McpToolError,
   minifiedResult,
   schemaConfirm,
   toolAnnotations,
-} from "@chrischall/mcp-utils";
-import { z } from "zod";
-import type {
-  KiaChargeTarget,
-  KiaClient,
-  KiaCommandResult,
-} from "../client.js";
+} from '@chrischall/mcp-utils';
+import { z } from 'zod';
+import type { KiaChargeTarget, KiaClient, KiaCommandResult } from '../client.js';
 import {
   BASE_URL,
   COMMAND_SPECS,
   type CommandSpec,
   ENDPOINTS,
   type KiaCommandName,
-} from "../protocol.js";
-import { getKiaWriteMode } from "./commands.js";
+} from '../protocol.js';
+import { getKiaWriteMode } from './commands.js';
 
 // ---------------------------------------------------------------------------
 // Schema atoms
@@ -53,13 +49,8 @@ const schemaVinKey = z
   .string()
   .min(1)
   .max(200)
-  .regex(
-    /^[!-~]+$/,
-    "vinKey must be printable ASCII with no whitespace or control characters",
-  )
-  .describe(
-    "Vehicle key (the `vehicleKey` from the vehicle-list tool). Not the VIN.",
-  );
+  .regex(/^[!-~]+$/, 'vinKey must be printable ASCII with no whitespace or control characters')
+  .describe('Vehicle key (the `vehicleKey` from the vehicle-list tool). Not the VIN.');
 
 /**
  * Lower bound on a target state of charge. Kia's own app offers 50–100% in 10%
@@ -75,10 +66,10 @@ const schemaChargeTarget = z.object({
     .min(0)
     .max(1)
     .describe(
-      "Plug type: 1 = AC, 0 = DC per the open-source Kia client, though this server has not confirmed it " +
-        "against a vehicle (both targets were set and restored together during verification, so the two were " +
-        "never distinguished). Safest usage is unchanged: read the current targets first and mirror the " +
-        "plugType values it returns. Note evc/sts REPLACES the list, so send an entry for BOTH plug types.",
+      'Plug type: 1 = AC, 0 = DC per the open-source Kia client, though this server has not confirmed it ' +
+        'against a vehicle (both targets were set and restored together during verification, so the two were ' +
+        'never distinguished). Safest usage is unchanged: read the current targets first and mirror the ' +
+        'plugType values it returns. Note evc/sts REPLACES the list, so send an entry for BOTH plug types.',
     ),
   targetSOClevel: z
     .number()
@@ -102,8 +93,8 @@ const schemaChargeTarget = z.object({
  * `evc/gts` for a limit change.
  */
 const ACCEPTED_HINT =
-  "A success status means Kia accepted the command, not that the car has acted on it yet. Confirm with " +
-  "kia_vehicle_status (evStatus.batteryCharge flips within ~30-60s) or, for limits, kia_charge_targets.";
+  'A success status means Kia accepted the command, not that the car has acted on it yet. Confirm with ' +
+  'kia_vehicle_status (evStatus.batteryCharge flips within ~30-60s) or, for limits, kia_charge_targets.';
 
 /**
  * Confirm-gate for a mutating tool. Without `confirm: true` NO network call is
@@ -136,7 +127,7 @@ function previewUnlessConfirmed(
     endpointVerified: spec.verified,
     note: spec.note,
     verification: args.verification,
-    hint: "No request was made. Re-run with confirm: true to execute.",
+    hint: 'No request was made. Re-run with confirm: true to execute.',
   });
 }
 
@@ -163,31 +154,28 @@ function describeCommand(result: KiaCommandResult): Record<string, unknown> {
  * answer lives.
  */
 const CONFIRM_VIA_STATUS =
-  "Not attempted inline — the car takes ~30-60s to act. Confirm by calling kia_vehicle_status and reading " +
-  "evStatus.batteryCharge (true while charging). evc/gts reports the TARGET state of charge, not whether " +
-  "the car is charging, which is why the charge tools do not use it as proof.";
+  'Not attempted inline — the car takes ~30-60s to act. Confirm by calling kia_vehicle_status and reading ' +
+  'evStatus.batteryCharge (true while charging). evc/gts reports the TARGET state of charge, not whether ' +
+  'the car is charging, which is why the charge tools do not use it as proof.';
 
 // ---------------------------------------------------------------------------
 // Registrar
 // ---------------------------------------------------------------------------
 
-export function registerChargingTools(
-  server: McpServer,
-  client: KiaClient,
-): void {
+export function registerChargingTools(server: McpServer, client: KiaClient): void {
   // Charging commands register under `comfort` and `all`; the read below always
   // registers. The gate itself lives in `./commands.js` — one copy, shared by
   // every registrar, because two copies of a safety control drift.
-  const commandsAllowed = getKiaWriteMode() !== "none";
+  const commandsAllowed = getKiaWriteMode() !== 'none';
 
   server.registerTool(
-    "kia_charge_targets",
+    'kia_charge_targets',
     {
       description:
         `Read the EV charge targets (\`${ENDPOINTS.chargeTargets}\`): the target state of charge per plug type ` +
-        "(one entry for AC, one for DC). Verified live against a real vehicle. Read-only — makes no changes.",
+        '(one entry for AC, one for DC). Verified live against a real vehicle. Read-only — makes no changes.',
       annotations: toolAnnotations({
-        title: "Kia EV charge targets",
+        title: 'Kia EV charge targets',
         openWorld: true,
       }),
       inputSchema: z.object({ vinKey: schemaVinKey }),
@@ -198,7 +186,7 @@ export function registerChargingTools(
         vinKey,
         endpoint: ENDPOINTS.chargeTargets,
         targets,
-        note: "targetSOClevel is a percentage. Which plugType is AC and which is DC is not documented by Kia.",
+        note: 'targetSOClevel is a percentage. Which plugType is AC and which is DC is not documented by Kia.',
       });
     },
   );
@@ -206,16 +194,16 @@ export function registerChargingTools(
   if (!commandsAllowed) return;
 
   server.registerTool(
-    "kia_start_charge",
+    'kia_start_charge',
     {
       description:
         `Ask the vehicle to start charging (\`${COMMAND_SPECS.charge.path}\`). ` +
-        "Verified against a plugged-in vehicle: evStatus.batteryCharge goes true within ~30-60s. Requires the car " +
-        "to be plugged in — on an unplugged car Kia still accepts the request and nothing happens. Confirm with " +
-        "kia_vehicle_status rather than trusting the success status. " +
-        "Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.",
+        'Verified against a plugged-in vehicle: evStatus.batteryCharge goes true within ~30-60s. Requires the car ' +
+        'to be plugged in — on an unplugged car Kia still accepts the request and nothing happens. Confirm with ' +
+        'kia_vehicle_status rather than trusting the success status. ' +
+        'Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.',
       annotations: toolAnnotations({
-        title: "Start Kia EV charging",
+        title: 'Start Kia EV charging',
         readOnly: false,
         idempotent: true,
         openWorld: true,
@@ -227,16 +215,14 @@ export function registerChargingTools(
           .int()
           .min(MIN_TARGET_SOC)
           .max(100)
-          .describe(
-            `Charge up to this percentage, ${MIN_TARGET_SOC}–100. Defaults to 100.`,
-          )
+          .describe(`Charge up to this percentage, ${MIN_TARGET_SOC}–100. Defaults to 100.`)
           .optional(),
         confirm: schemaConfirm,
       }),
     },
     async ({ vinKey, chargeRatio, confirm }) => {
       const ratio = chargeRatio ?? 100;
-      const gate = previewUnlessConfirmed(confirm, "charge", {
+      const gate = previewUnlessConfirmed(confirm, 'charge', {
         vinKey,
         action: `Start charging vehicle ${vinKey} to ${ratio}%`,
         body: { chargeRatio: ratio },
@@ -255,15 +241,15 @@ export function registerChargingTools(
   );
 
   server.registerTool(
-    "kia_stop_charge",
+    'kia_stop_charge',
     {
       description:
         `Ask the vehicle to stop charging (\`${COMMAND_SPECS.cancelCharge.path}\`). ` +
-        "Verified against a charging vehicle: evStatus.batteryCharge goes false within ~30-60s. Confirm with " +
-        "kia_vehicle_status rather than trusting the success status. " +
-        "Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.",
+        'Verified against a charging vehicle: evStatus.batteryCharge goes false within ~30-60s. Confirm with ' +
+        'kia_vehicle_status rather than trusting the success status. ' +
+        'Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.',
       annotations: toolAnnotations({
-        title: "Stop Kia EV charging",
+        title: 'Stop Kia EV charging',
         readOnly: false,
         idempotent: true,
         openWorld: true,
@@ -271,7 +257,7 @@ export function registerChargingTools(
       inputSchema: z.object({ vinKey: schemaVinKey, confirm: schemaConfirm }),
     },
     async ({ vinKey, confirm }) => {
-      const gate = previewUnlessConfirmed(confirm, "cancelCharge", {
+      const gate = previewUnlessConfirmed(confirm, 'cancelCharge', {
         vinKey,
         action: `Stop charging vehicle ${vinKey}`,
         verification: CONFIRM_VIA_STATUS,
@@ -288,17 +274,17 @@ export function registerChargingTools(
   );
 
   server.registerTool(
-    "kia_set_charge_limits",
+    'kia_set_charge_limits',
     {
       description:
         `Set the target state of charge per plug type (\`${COMMAND_SPECS.setChargeTargets.path}\`). ` +
-        "Verified against a real vehicle. The write is checked: afterwards the targets are re-read from evc/gts " +
-        "and compared, and the result reports whether the change actually landed. Send BOTH plug types — the list " +
-        "replaces the stored one, so omitting an entry drops that target. " +
-        "Without confirm:true it makes NO network call (not even the baseline read) and returns a dry-run preview " +
-        "of exactly what would be sent.",
+        'Verified against a real vehicle. The write is checked: afterwards the targets are re-read from evc/gts ' +
+        'and compared, and the result reports whether the change actually landed. Send BOTH plug types — the list ' +
+        'replaces the stored one, so omitting an entry drops that target. ' +
+        'Without confirm:true it makes NO network call (not even the baseline read) and returns a dry-run preview ' +
+        'of exactly what would be sent.',
       annotations: toolAnnotations({
-        title: "Set Kia EV charge limits",
+        title: 'Set Kia EV charge limits',
         readOnly: false,
         idempotent: true,
         openWorld: true,
@@ -310,13 +296,11 @@ export function registerChargingTools(
           .min(1)
           .max(2)
           .describe(
-            "One entry per plug type. Read the current targets first and change only what you mean to.",
+            'One entry per plug type. Read the current targets first and change only what you mean to.',
           ),
         verify: z
           .boolean()
-          .describe(
-            "Re-read evc/gts afterwards to check the change landed. Defaults to true.",
-          )
+          .describe('Re-read evc/gts afterwards to check the change landed. Defaults to true.')
           .optional(),
         confirm: schemaConfirm,
       }),
@@ -329,17 +313,17 @@ export function registerChargingTools(
         throw new McpToolError(
           `Duplicate plugType ${duplicate.plugType} in targets — each plug type may appear once.`,
           {
-            hint: "Send at most one entry per plugType. Read the current charge targets to see which plug types exist.",
+            hint: 'Send at most one entry per plugType. Read the current charge targets to see which plug types exist.',
           },
         );
       }
 
-      const gate = previewUnlessConfirmed(confirm, "setChargeTargets", {
+      const gate = previewUnlessConfirmed(confirm, 'setChargeTargets', {
         vinKey,
-        action: `Set charge targets on vehicle ${vinKey} to ${targets.map((t) => `plug ${t.plugType} → ${t.targetSOClevel}%`).join(", ")}`,
+        action: `Set charge targets on vehicle ${vinKey} to ${targets.map((t) => `plug ${t.plugType} → ${t.targetSOClevel}%`).join(', ')}`,
         body: { targetSOClist: targets },
         verification:
-          "After the write, evc/gts is re-read and the targets compared (unless verify:false).",
+          'After the write, evc/gts is re-read and the targets compared (unless verify:false).',
       });
       if (gate) return gate;
 
@@ -350,7 +334,7 @@ export function registerChargingTools(
           requested: targets,
           verification: {
             attempted: false,
-            reason: "Caller passed verify:false, so evc/gts was not re-read.",
+            reason: 'Caller passed verify:false, so evc/gts was not re-read.',
           },
           hint: ACCEPTED_HINT,
         });
@@ -364,9 +348,7 @@ export function registerChargingTools(
         (snapshot) =>
           targets.every((t) =>
             snapshot.some(
-              (c) =>
-                c.plugType === t.plugType &&
-                c.targetSOClevel === t.targetSOClevel,
+              (c) => c.plugType === t.plugType && c.targetSOClevel === t.targetSOClevel,
             ),
           ),
         { baseline, timeoutMs: 30_000, intervalMs: 5_000 },
@@ -383,7 +365,7 @@ export function registerChargingTools(
           changedFields: check.changedFields,
           targets: check.snapshot,
           hint: check.verified
-            ? "Confirmed by re-reading evc/gts — the requested targets are what the car reports."
+            ? 'Confirmed by re-reading evc/gts — the requested targets are what the car reports.'
             : `Kia accepted the request but evc/gts still does not report the requested targets. ${ACCEPTED_HINT}`,
         },
       });

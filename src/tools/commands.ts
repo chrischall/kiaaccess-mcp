@@ -19,7 +19,7 @@
  *     at all (see {@link getKiaWriteMode}). An unregistered tool cannot be
  *     invoked by any host permission setting or injected instruction.
  */
-import type { McpServer, CallToolResult } from "@modelcontextprotocol/server";
+import type { McpServer, CallToolResult } from '@modelcontextprotocol/server';
 import {
   McpToolError,
   SafePathSegment,
@@ -27,8 +27,8 @@ import {
   readEnvVar,
   schemaConfirm,
   toolAnnotations,
-} from "@chrischall/mcp-utils";
-import { z } from "zod";
+} from '@chrischall/mcp-utils';
+import { z } from 'zod';
 import {
   type KiaClient,
   type KiaCommandResult,
@@ -36,13 +36,8 @@ import {
   type StartClimateOptions,
   buildStartClimateBody,
   extractVehicleStatus,
-} from "../client.js";
-import {
-  BASE_URL,
-  COMMAND_SPECS,
-  type CommandSpec,
-  type KiaCommandName,
-} from "../protocol.js";
+} from '../client.js';
+import { BASE_URL, COMMAND_SPECS, type CommandSpec, type KiaCommandName } from '../protocol.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so a real client
@@ -50,12 +45,12 @@ import {
  */
 export type KiaCommandsClient = Pick<
   KiaClient,
-  | "getVehicleStatus"
-  | "lockDoors"
-  | "unlockDoors"
-  | "startClimate"
-  | "stopClimate"
-  | "verifyCommand"
+  | 'getVehicleStatus'
+  | 'lockDoors'
+  | 'unlockDoors'
+  | 'startClimate'
+  | 'stopClimate'
+  | 'verifyCommand'
 >;
 
 // ---------------------------------------------------------------------------
@@ -63,7 +58,7 @@ export type KiaCommandsClient = Pick<
 // ---------------------------------------------------------------------------
 
 /** Deployment-wide ceiling on which vehicle commands are registered at all. */
-export type KiaWriteMode = "none" | "comfort" | "all";
+export type KiaWriteMode = 'none' | 'comfort' | 'all';
 
 /**
  * Read the command-registration gate, at registration time (startup).
@@ -76,16 +71,16 @@ export type KiaWriteMode = "none" | "comfort" | "all";
  * typo must never silently grant the ability to unlock a car.
  */
 export function getKiaWriteMode(): KiaWriteMode {
-  const raw = readEnvVar("KIA_WRITE_MODE");
-  if (raw === undefined) return "comfort";
+  const raw = readEnvVar('KIA_WRITE_MODE');
+  if (raw === undefined) return 'comfort';
   const mode = raw.toLowerCase();
-  if (mode === "none" || mode === "comfort" || mode === "all") return mode;
+  if (mode === 'none' || mode === 'comfort' || mode === 'all') return mode;
   // stdio transport: stderr only — stdout is reserved for JSON-RPC.
   console.error(
     `[kiaaccess-mcp] Unrecognized KIA_WRITE_MODE "${raw}" — failing closed to "none" ` +
-      "(no vehicle command tools registered). Valid values: none, comfort, all.",
+      '(no vehicle command tools registered). Valid values: none, comfort, all.',
   );
-  return "none";
+  return 'none';
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +88,7 @@ export function getKiaWriteMode(): KiaWriteMode {
 // ---------------------------------------------------------------------------
 
 const vinKeyArg = SafePathSegment.describe(
-  "The vehicle key (`vehicleKey` from the vehicle-list tool), used as the `vinkey` header. Not the VIN.",
+  'The vehicle key (`vehicleKey` from the vehicle-list tool), used as the `vinkey` header. Not the VIN.',
 );
 
 const waitSecondsArg = z
@@ -103,8 +98,8 @@ const waitSecondsArg = z
   .max(300)
   .default(60)
   .describe(
-    "How long to keep re-reading cmm/gvi for proof the command landed (default 60). Observed changes took " +
-      "30–60s. 0 checks once and returns immediately — the command may still land afterwards.",
+    'How long to keep re-reading cmm/gvi for proof the command landed (default 60). Observed changes took ' +
+      '30–60s. 0 checks once and returns immediately — the command may still land afterwards.',
   );
 
 /** Every command tool takes the same three arguments plus its own options. */
@@ -119,13 +114,9 @@ export const CLIMATE_TEMP_MIN_F = 62;
 export const CLIMATE_TEMP_MAX_F = 82;
 
 /** The two out-of-range values Kia accepts in `airTemp.value` instead of a number. */
-export const CLIMATE_TEMP_SENTINELS = ["LOW", "HIGH"] as const;
+export const CLIMATE_TEMP_SENTINELS = ['LOW', 'HIGH'] as const;
 
-const fahrenheit = z
-  .number()
-  .int()
-  .min(CLIMATE_TEMP_MIN_F)
-  .max(CLIMATE_TEMP_MAX_F);
+const fahrenheit = z.number().int().min(CLIMATE_TEMP_MIN_F).max(CLIMATE_TEMP_MAX_F);
 
 /**
  * Target cabin temperature: a number, a `LOW`/`HIGH` sentinel — or a
@@ -156,13 +147,13 @@ const temperatureArg = z
   .describe(
     `Target cabin temperature in °F, ${CLIMATE_TEMP_MIN_F}–${CLIMATE_TEMP_MAX_F}, or the sentinel "LOW"/"HIGH" for ` +
       'the ends of the range (default 70). A quoted whole number ("72") is accepted and treated as the number. ' +
-      "BEST-EFFORT / UNCONFIRMED — see docs/KIA-API.md.",
+      'BEST-EFFORT / UNCONFIRMED — see docs/KIA-API.md.',
   )
   .optional();
 
 const NO_GTS_NOTE =
-  "Proof comes from re-reading cmm/gvi and diffing the field (syncDate excluded — it advances on every read). " +
-  "cmm/gts is never polled: it reports global flags, never per-command completion.";
+  'Proof comes from re-reading cmm/gvi and diffing the field (syncDate excluded — it advances on every read). ' +
+  'cmm/gts is never polled: it reports global flags, never per-command completion.';
 
 // ---------------------------------------------------------------------------
 // Proof-field plumbing
@@ -171,8 +162,8 @@ const NO_GTS_NOTE =
 /** Resolve a dotted path (e.g. `climate.airCtrl`) inside a vehicle status. */
 function readPath(status: KiaVehicleStatus | null, path: string): unknown {
   let current: unknown = status;
-  for (const key of path.split(".")) {
-    if (typeof current !== "object" || current === null) return undefined;
+  for (const key of path.split('.')) {
+    if (typeof current !== 'object' || current === null) return undefined;
     current = (current as Record<string, unknown>)[key];
   }
   return current;
@@ -188,9 +179,7 @@ function observeProof(
   status: KiaVehicleStatus | null,
   fields: readonly string[],
 ): Record<string, unknown> {
-  return Object.fromEntries(
-    fields.map((field) => [field, readPath(status, field) ?? null]),
-  );
+  return Object.fromEntries(fields.map((field) => [field, readPath(status, field) ?? null]));
 }
 
 /** What each command must read back for the state change to count as observed. */
@@ -230,7 +219,7 @@ function previewCommand(plan: CommandPlan, vinKey: string): CallToolResult {
     vinKey,
     ...(plan.body === undefined ? {} : { willSend: plan.body }),
     headers:
-      "The full static Kia header set plus `sid`, `vinkey` and the mandatory RFC 1123 `date`, added by the client.",
+      'The full static Kia header set plus `sid`, `vinkey` and the mandatory RFC 1123 `date`, added by the client.',
     endpointVerified: spec.verified,
     ...(spec.note === undefined ? {} : { endpointNote: spec.note }),
     proof: {
@@ -238,7 +227,7 @@ function previewCommand(plan: CommandPlan, vinKey: string): CallToolResult {
       willAlsoReport: spec.proofFields,
       method: NO_GTS_NOTE,
     },
-    note: "NO network call was made and the vehicle was not touched. Re-run with confirm: true to execute.",
+    note: 'NO network call was made and the vehicle was not touched. Re-run with confirm: true to execute.',
   });
 }
 
@@ -264,7 +253,7 @@ async function runCommand(
     throw new McpToolError(
       `Kia returned no vehicle record for vinKey "${vinKey}" — no command was sent.`,
       {
-        hint: "Use the vehicle-list tool and pass its `vehicleKey` (not the VIN) as vinKey.",
+        hint: 'Use the vehicle-list tool and pass its `vehicleKey` (not the VIN) as vinKey.',
       },
     );
   }
@@ -274,13 +263,9 @@ async function runCommand(
 
   const verification = await client.verifyCommand<KiaVehicleStatus | null>(
     async () =>
-      extractVehicleStatus(
-        await client.getVehicleStatus(vinKey, { includeClimate: true }),
-      ),
+      extractVehicleStatus(await client.getVehicleStatus(vinKey, { includeClimate: true })),
     (snapshot) =>
-      Object.entries(plan.expect).every(
-        ([field, want]) => readPath(snapshot, field) === want,
-      ),
+      Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want),
     { baseline, timeoutMs: waitSeconds * 1000 },
   );
 
@@ -307,14 +292,14 @@ async function runCommand(
       ? `Kia accepted the command AND the re-read confirms it: ${describeExpectation(plan.expect)}.`
       : `Kia ACCEPTED the command, but the expected state (${describeExpectation(plan.expect)}) was NOT observed ` +
         `within ${waitSeconds}s. Changes were observed to take 30–60s, so it may still land — re-read the vehicle ` +
-        "status before saying anything about the car. Do not report this as done.",
+        'status before saying anything about the car. Do not report this as done.',
   });
 }
 
 function describeExpectation(expect: ProofExpectation): string {
   return Object.entries(expect)
     .map(([field, want]) => `${field} === ${want}`)
-    .join(" and ");
+    .join(' and ');
 }
 
 // ---------------------------------------------------------------------------
@@ -326,37 +311,34 @@ function describeExpectation(expect: ProofExpectation): string {
  * `KIA_WRITE_MODE`. Door locks require `all`; climate requires `comfort` or
  * `all`; `none` (and any unrecognised value) registers nothing.
  */
-export function registerCommandsTools(
-  server: McpServer,
-  client: KiaCommandsClient,
-): void {
+export function registerCommandsTools(server: McpServer, client: KiaCommandsClient): void {
   const writeMode = getKiaWriteMode();
-  if (writeMode === "none") return;
+  if (writeMode === 'none') return;
 
-  if (writeMode === "all") {
+  if (writeMode === 'all') {
     registerDoorTool(server, client, {
-      name: "kia_lock_doors",
-      title: "Lock doors",
+      name: 'kia_lock_doors',
+      title: 'Lock doors',
       plan: (vinKey) => ({
-        command: "lock",
+        command: 'lock',
         action: `Lock the doors of vehicle ${vinKey}`,
         expect: { doorLock: true },
       }),
       invoke: (vinKey) => client.lockDoors(vinKey),
       destructive: false,
       description:
-        "Lock the vehicle doors (Kia `rems/door/lock`, live-verified). Without confirm:true this makes NO network " +
-        "call and returns a dry-run preview of the exact request; with confirm:true it sends the command and then " +
-        "re-reads cmm/gvi until `doorLock` reads true. The result reports `commandAccepted` (Kia took the request) " +
-        "and `stateConfirmed` (the car actually reads locked) separately — only `stateConfirmed: true` means the " +
-        "doors are locked. State changes were observed to take 30–60s.",
+        'Lock the vehicle doors (Kia `rems/door/lock`, live-verified). Without confirm:true this makes NO network ' +
+        'call and returns a dry-run preview of the exact request; with confirm:true it sends the command and then ' +
+        're-reads cmm/gvi until `doorLock` reads true. The result reports `commandAccepted` (Kia took the request) ' +
+        'and `stateConfirmed` (the car actually reads locked) separately — only `stateConfirmed: true` means the ' +
+        'doors are locked. State changes were observed to take 30–60s.',
     });
 
     registerDoorTool(server, client, {
-      name: "kia_unlock_doors",
-      title: "Unlock doors",
+      name: 'kia_unlock_doors',
+      title: 'Unlock doors',
       plan: (vinKey) => ({
-        command: "unlock",
+        command: 'unlock',
         action: `Unlock the doors of vehicle ${vinKey}`,
         expect: { doorLock: false },
       }),
@@ -365,34 +347,34 @@ export function registerCommandsTools(
       // leaves it that way until someone acts — treat it as destructive.
       destructive: true,
       description:
-        "UNLOCK the vehicle doors (Kia `rems/door/unlock`, live-verified). This leaves the car physically " +
-        "unsecured until it is locked again — only run it when the user has explicitly asked to unlock this " +
-        "vehicle. Without confirm:true this makes NO network call and returns a dry-run preview; with " +
-        "confirm:true it sends the command and re-reads cmm/gvi until `doorLock` reads false. `commandAccepted` " +
-        "(Kia took the request) and `stateConfirmed` (the car actually reads unlocked) are reported separately. " +
-        "State changes were observed to take 30–60s.",
+        'UNLOCK the vehicle doors (Kia `rems/door/unlock`, live-verified). This leaves the car physically ' +
+        'unsecured until it is locked again — only run it when the user has explicitly asked to unlock this ' +
+        'vehicle. Without confirm:true this makes NO network call and returns a dry-run preview; with ' +
+        'confirm:true it sends the command and re-reads cmm/gvi until `doorLock` reads false. `commandAccepted` ' +
+        '(Kia took the request) and `stateConfirmed` (the car actually reads unlocked) are reported separately. ' +
+        'State changes were observed to take 30–60s.',
     });
   }
 
   // Climate registers under `comfort` and `all`.
   server.registerTool(
-    "kia_start_climate",
+    'kia_start_climate',
     {
       description:
-        "Start remote climate control / preconditioning (Kia `rems/start`, live-verified). Without confirm:true " +
-        "this makes NO network call and returns a dry-run preview of the exact body; with confirm:true it sends " +
-        "the command and re-reads cmm/gvi until the NESTED `climate.airCtrl` reads true (there is no flat " +
-        "`airCtrlOn` field). On an EV `engine` stays false while climate runs — `ign3` is the ignition proxy and " +
-        "is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually " +
-        "reads running) are separate; state changes were observed to take 30–60s. " +
-        "TEMPERATURE IS BEST-EFFORT AND UNCONFIRMED: per docs/KIA-API.md a start requesting 70°F still read back " +
-        "72°F, so the car may report its own last-set target rather than the requested one — do not promise the " +
-        "user a specific cabin temperature. Seat and steering-wheel/rear-window heating are not sent at all: the " +
-        "request body deliberately omits `heatVentSeat` (Kia validates seat capability per car) and leaves every " +
-        "`heatingAccessory` field at 0.",
+        'Start remote climate control / preconditioning (Kia `rems/start`, live-verified). Without confirm:true ' +
+        'this makes NO network call and returns a dry-run preview of the exact body; with confirm:true it sends ' +
+        'the command and re-reads cmm/gvi until the NESTED `climate.airCtrl` reads true (there is no flat ' +
+        '`airCtrlOn` field). On an EV `engine` stays false while climate runs — `ign3` is the ignition proxy and ' +
+        'is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually ' +
+        'reads running) are separate; state changes were observed to take 30–60s. ' +
+        'TEMPERATURE IS BEST-EFFORT AND UNCONFIRMED: per docs/KIA-API.md a start requesting 70°F still read back ' +
+        '72°F, so the car may report its own last-set target rather than the requested one — do not promise the ' +
+        'user a specific cabin temperature. Seat and steering-wheel/rear-window heating are not sent at all: the ' +
+        'request body deliberately omits `heatVentSeat` (Kia validates seat capability per car) and leaves every ' +
+        '`heatingAccessory` field at 0.',
       annotations: {
         ...toolAnnotations({
-          title: "Start climate",
+          title: 'Start climate',
           readOnly: false,
           idempotent: true,
           openWorld: true,
@@ -408,21 +390,11 @@ export function registerCommandsTools(
           .min(1)
           .max(30)
           .default(5)
-          .describe("Minutes the ignition stays on (default 5)."),
-        defrost: z
-          .boolean()
-          .default(false)
-          .describe("Run front defrost (default false)."),
+          .describe('Minutes the ignition stays on (default 5).'),
+        defrost: z.boolean().default(false).describe('Run front defrost (default false).'),
       }),
     },
-    async ({
-      vinKey,
-      waitSeconds,
-      confirm,
-      temperature,
-      durationMinutes,
-      defrost,
-    }) => {
+    async ({ vinKey, waitSeconds, confirm, temperature, durationMinutes, defrost }) => {
       const options: StartClimateOptions = {
         // `airTempF` is typed `number`, but the builder stringifies it and Kia's
         // `airTemp.value` is a STRING whose domain includes the "LOW"/"HIGH"
@@ -434,9 +406,9 @@ export function registerCommandsTools(
         defrost,
       };
       const plan: CommandPlan = {
-        command: "start",
-        action: `Start climate on vehicle ${vinKey} (${temperature ?? 70}°F, ${durationMinutes} min${defrost ? ", defrost" : ""})`,
-        expect: { "climate.airCtrl": true },
+        command: 'start',
+        action: `Start climate on vehicle ${vinKey} (${temperature ?? 70}°F, ${durationMinutes} min${defrost ? ', defrost' : ''})`,
+        expect: { 'climate.airCtrl': true },
         body: buildStartClimateBody(options),
       };
       if (confirm !== true) return previewCommand(plan, vinKey);
@@ -446,17 +418,17 @@ export function registerCommandsTools(
     },
   );
   server.registerTool(
-    "kia_stop_climate",
+    'kia_stop_climate',
     {
       description:
-        "Stop remote climate control (Kia `rems/stop`, live-verified). Without confirm:true this makes NO network " +
-        "call and returns a dry-run preview; with confirm:true it sends the command and re-reads cmm/gvi until the " +
-        "NESTED `climate.airCtrl` reads false (there is no flat `airCtrlOn` field); `ign3` — the EV ignition proxy " +
-        "— is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually " +
-        "reads stopped) are separate. State changes were observed to take 30–60s.",
+        'Stop remote climate control (Kia `rems/stop`, live-verified). Without confirm:true this makes NO network ' +
+        'call and returns a dry-run preview; with confirm:true it sends the command and re-reads cmm/gvi until the ' +
+        'NESTED `climate.airCtrl` reads false (there is no flat `airCtrlOn` field); `ign3` — the EV ignition proxy ' +
+        '— is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually ' +
+        'reads stopped) are separate. State changes were observed to take 30–60s.',
       annotations: {
         ...toolAnnotations({
-          title: "Stop climate",
+          title: 'Stop climate',
           readOnly: false,
           idempotent: true,
           openWorld: true,
@@ -467,14 +439,12 @@ export function registerCommandsTools(
     },
     async ({ vinKey, waitSeconds, confirm }) => {
       const plan: CommandPlan = {
-        command: "stop",
+        command: 'stop',
         action: `Stop climate on vehicle ${vinKey}`,
-        expect: { "climate.airCtrl": false },
+        expect: { 'climate.airCtrl': false },
       };
       if (confirm !== true) return previewCommand(plan, vinKey);
-      return runCommand(client, plan, { vinKey, waitSeconds }, () =>
-        client.stopClimate(vinKey),
-      );
+      return runCommand(client, plan, { vinKey, waitSeconds }, () => client.stopClimate(vinKey));
     },
   );
 }
@@ -510,9 +480,7 @@ function registerDoorTool(
     async ({ vinKey, waitSeconds, confirm }) => {
       const plan = tool.plan(vinKey);
       if (confirm !== true) return previewCommand(plan, vinKey);
-      return runCommand(client, plan, { vinKey, waitSeconds }, () =>
-        tool.invoke(vinKey),
-      );
+      return runCommand(client, plan, { vinKey, waitSeconds }, () => tool.invoke(vinKey));
     },
   );
 }
