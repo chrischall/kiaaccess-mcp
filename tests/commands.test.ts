@@ -1,26 +1,26 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { textResult } from "@chrischall/mcp-utils";
-import { createTestHarness, parseToolResult } from "@chrischall/mcp-utils/test";
-import type { CallToolResult } from "@modelcontextprotocol/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { textResult } from '@chrischall/mcp-utils';
+import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 import type {
   KiaCommandResult,
   KiaVehicleInfo,
   KiaVehicleStatus,
   VerifyCommandResult,
-} from "../src/client.js";
+} from '../src/client.js';
 import {
   type KiaCommandsClient,
   getKiaWriteMode,
   registerCommandsTools,
-} from "../src/tools/commands.js";
-import { z } from "zod";
+} from '../src/tools/commands.js';
+import { z } from 'zod';
 
 // Obvious fakes only — no real vin, vehicle key, sid or coordinates anywhere.
-const VIN_KEY = "FAKE-VEHICLE-KEY";
-const XID = "FAKE-XID-0001";
+const VIN_KEY = 'FAKE-VEHICLE-KEY';
+const XID = 'FAKE-XID-0001';
 
-const CLIMATE_TOOLS = ["kia_start_climate", "kia_stop_climate"];
-const DOOR_TOOLS = ["kia_lock_doors", "kia_unlock_doors"];
+const CLIMATE_TOOLS = ['kia_start_climate', 'kia_stop_climate'];
+const DOOR_TOOLS = ['kia_lock_doors', 'kia_unlock_doors'];
 const ALL_TOOLS = [...DOOR_TOOLS, ...CLIMATE_TOOLS];
 
 /** A `cmm/gvi` record wrapping the given nested `vehicleStatus`. */
@@ -28,23 +28,21 @@ function vehicleInfo(status: KiaVehicleStatus): KiaVehicleInfo {
   return {
     vinKey: VIN_KEY,
     lastVehicleInfo: {
-      vehicleNickName: "Fake Car",
+      vehicleNickName: 'Fake Car',
       vehicleStatusRpt: { vehicleStatus: status },
     },
   };
 }
 
-function commandResult(
-  overrides: Partial<KiaCommandResult> = {},
-): KiaCommandResult {
+function commandResult(overrides: Partial<KiaCommandResult> = {}): KiaCommandResult {
   return {
-    command: "lock",
-    path: "rems/door/lock",
-    method: "GET",
+    command: 'lock',
+    path: 'rems/door/lock',
+    method: 'GET',
     verified: true,
     xid: XID,
     raw: {
-      status: { statusCode: 0, errorMessage: "Success with response body" },
+      status: { statusCode: 0, errorMessage: 'Success with response body' },
     },
     ...overrides,
   };
@@ -58,7 +56,7 @@ function verification(
     attempts: 2,
     elapsedMs: 5200,
     snapshot: { doorLock: true },
-    changedFields: ["doorLock"],
+    changedFields: ['doorLock'],
     ...overrides,
   };
 }
@@ -84,15 +82,11 @@ function makeClient(): {
       }),
     ),
     lockDoors: vi.fn(async () => commandResult()),
-    unlockDoors: vi.fn(async () =>
-      commandResult({ command: "unlock", path: "rems/door/unlock" }),
-    ),
+    unlockDoors: vi.fn(async () => commandResult({ command: 'unlock', path: 'rems/door/unlock' })),
     startClimate: vi.fn(async () =>
-      commandResult({ command: "start", path: "rems/start", method: "POST" }),
+      commandResult({ command: 'start', path: 'rems/start', method: 'POST' }),
     ),
-    stopClimate: vi.fn(async () =>
-      commandResult({ command: "stop", path: "rems/stop" }),
-    ),
+    stopClimate: vi.fn(async () => commandResult({ command: 'stop', path: 'rems/stop' })),
     verifyCommand: vi.fn(async () => verification()),
   };
   return { client: spies as unknown as KiaCommandsClient, spies };
@@ -110,15 +104,13 @@ async function harnessFor(client: KiaCommandsClient) {
 }
 
 function textOf(result: CallToolResult): string {
-  return result.content
-    .map((block) => ("text" in block ? block.text : ""))
-    .join("\n");
+  return result.content.map((block) => ('text' in block ? block.text : '')).join('\n');
 }
 
 const originalWriteMode = process.env.KIA_WRITE_MODE;
 
 beforeEach(() => {
-  process.env.KIA_WRITE_MODE = "all";
+  process.env.KIA_WRITE_MODE = 'all';
 });
 
 afterEach(() => {
@@ -127,34 +119,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("getKiaWriteMode", () => {
-  it("defaults to comfort when unset or blank", () => {
+describe('getKiaWriteMode', () => {
+  it('defaults to comfort when unset or blank', () => {
     delete process.env.KIA_WRITE_MODE;
-    expect(getKiaWriteMode()).toBe("comfort");
-    process.env.KIA_WRITE_MODE = "   ";
-    expect(getKiaWriteMode()).toBe("comfort");
+    expect(getKiaWriteMode()).toBe('comfort');
+    process.env.KIA_WRITE_MODE = '   ';
+    expect(getKiaWriteMode()).toBe('comfort');
   });
 
-  it("accepts the three modes case-insensitively", () => {
-    process.env.KIA_WRITE_MODE = "none";
-    expect(getKiaWriteMode()).toBe("none");
-    process.env.KIA_WRITE_MODE = "Comfort";
-    expect(getKiaWriteMode()).toBe("comfort");
-    process.env.KIA_WRITE_MODE = "ALL";
-    expect(getKiaWriteMode()).toBe("all");
+  it('accepts the three modes case-insensitively', () => {
+    process.env.KIA_WRITE_MODE = 'none';
+    expect(getKiaWriteMode()).toBe('none');
+    process.env.KIA_WRITE_MODE = 'Comfort';
+    expect(getKiaWriteMode()).toBe('comfort');
+    process.env.KIA_WRITE_MODE = 'ALL';
+    expect(getKiaWriteMode()).toBe('all');
   });
 
-  it("fails closed to none on an unrecognised value, warning on stderr", () => {
-    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
-    process.env.KIA_WRITE_MODE = "yes-please";
-    expect(getKiaWriteMode()).toBe("none");
+  it('fails closed to none on an unrecognised value, warning on stderr', () => {
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.KIA_WRITE_MODE = 'yes-please';
+    expect(getKiaWriteMode()).toBe('none');
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[0]).toContain("yes-please");
-    expect(warn.mock.calls[0]?.[0]).toContain("none");
+    expect(warn.mock.calls[0]?.[0]).toContain('yes-please');
+    expect(warn.mock.calls[0]?.[0]).toContain('none');
   });
 });
 
-describe("registration gate", () => {
+describe('registration gate', () => {
   /**
    * Names this registrar contributed. A stand-in for the read tools the other
    * registrars add keeps the server advertising a tools capability even when
@@ -164,62 +156,60 @@ describe("registration gate", () => {
     const { client } = makeClient();
     const harness = await createTestHarness((server) => {
       server.registerTool(
-        "kia_probe_read_tool",
-        { description: "stand-in read tool", inputSchema: z.object({}) },
+        'kia_probe_read_tool',
+        { description: 'stand-in read tool', inputSchema: z.object({}) },
         async () => textResult({}),
       );
       registerCommandsTools(server, client);
     });
     const names = (await harness.listTools())
       .map((t) => t.name)
-      .filter((n) => n !== "kia_probe_read_tool");
+      .filter((n) => n !== 'kia_probe_read_tool');
     await harness.close();
     return names.sort();
   }
 
-  it("registers nothing under none", async () => {
-    process.env.KIA_WRITE_MODE = "none";
+  it('registers nothing under none', async () => {
+    process.env.KIA_WRITE_MODE = 'none';
     expect(await toolNames()).toEqual([]);
   });
 
-  it("registers climate only under comfort (the default)", async () => {
-    process.env.KIA_WRITE_MODE = "comfort";
+  it('registers climate only under comfort (the default)', async () => {
+    process.env.KIA_WRITE_MODE = 'comfort';
     expect(await toolNames()).toEqual([...CLIMATE_TOOLS].sort());
     delete process.env.KIA_WRITE_MODE;
     expect(await toolNames()).toEqual([...CLIMATE_TOOLS].sort());
   });
 
-  it("registers door locks only under all", async () => {
-    process.env.KIA_WRITE_MODE = "all";
+  it('registers door locks only under all', async () => {
+    process.env.KIA_WRITE_MODE = 'all';
     expect(await toolNames()).toEqual([...ALL_TOOLS].sort());
   });
 
-  it("registers nothing when the mode is unrecognised (fail closed)", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    process.env.KIA_WRITE_MODE = "everything";
+  it('registers nothing when the mode is unrecognised (fail closed)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.KIA_WRITE_MODE = 'everything';
     expect(await toolNames()).toEqual([]);
   });
 });
 
-describe("tool metadata", () => {
-  it("flags the temperature argument as best-effort/unconfirmed and cites the API doc", async () => {
+describe('tool metadata', () => {
+  it('flags the temperature argument as best-effort/unconfirmed and cites the API doc', async () => {
     const { client } = makeClient();
     const harness = await harnessFor(client);
     const { tools } = await harness.client.listTools();
-    const start = tools.find((t) => t.name === "kia_start_climate");
+    const start = tools.find((t) => t.name === 'kia_start_climate');
     expect(start?.description).toMatch(/best-effort/i);
     expect(start?.description).toMatch(/unconfirmed/i);
-    expect(start?.description).toContain("docs/KIA-API.md");
+    expect(start?.description).toContain('docs/KIA-API.md');
     await harness.close();
   });
 
-  it("marks unlock destructive and the rest non-destructive, all as writes", async () => {
+  it('marks unlock destructive and the rest non-destructive, all as writes', async () => {
     const { client } = makeClient();
     const harness = await harnessFor(client);
     const { tools } = await harness.client.listTools();
-    const byName = Object.fromEntries(
-      tools.map((t) => [t.name, t.annotations]),
-    );
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t.annotations]));
     expect(byName.kia_unlock_doors?.destructiveHint).toBe(true);
     expect(byName.kia_lock_doors?.destructiveHint).toBe(false);
     expect(byName.kia_start_climate?.destructiveHint).toBe(false);
@@ -232,36 +222,33 @@ describe("tool metadata", () => {
   });
 });
 
-describe("confirm gate", () => {
+describe('confirm gate', () => {
   it.each([
-    ["kia_lock_doors", "GET", "rems/door/lock"],
-    ["kia_unlock_doors", "GET", "rems/door/unlock"],
-    ["kia_start_climate", "POST", "rems/start"],
-    ["kia_stop_climate", "GET", "rems/stop"],
-  ])(
-    "%s without confirm makes NO call and previews the request",
-    async (name, method, path) => {
-      const { client, spies } = makeClient();
-      const harness = await harnessFor(client);
-      const result = await harness.callTool(name, { vinKey: VIN_KEY });
-      const payload = parseToolResult<Record<string, unknown>>(result);
-
-      expect(result.isError).toBeFalsy();
-      expect(payload.dryRun).toBe(true);
-      expect(payload.method).toBe(method);
-      expect(payload.path).toBe(path);
-      expect(payload.url).toBe(`https://api.owners.kia.com/apigw/v1/${path}`);
-      expect(payload.endpointVerified).toBe(true);
-      expect(String(payload.note)).toContain("confirm: true");
-      expectNoCalls(spies);
-      await harness.close();
-    },
-  );
-
-  it("treats confirm:false exactly like an absent confirm", async () => {
+    ['kia_lock_doors', 'GET', 'rems/door/lock'],
+    ['kia_unlock_doors', 'GET', 'rems/door/unlock'],
+    ['kia_start_climate', 'POST', 'rems/start'],
+    ['kia_stop_climate', 'GET', 'rems/stop'],
+  ])('%s without confirm makes NO call and previews the request', async (name, method, path) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    const result = await harness.callTool("kia_lock_doors", {
+    const result = await harness.callTool(name, { vinKey: VIN_KEY });
+    const payload = parseToolResult<Record<string, unknown>>(result);
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.dryRun).toBe(true);
+    expect(payload.method).toBe(method);
+    expect(payload.path).toBe(path);
+    expect(payload.url).toBe(`https://api.owners.kia.com/apigw/v1/${path}`);
+    expect(payload.endpointVerified).toBe(true);
+    expect(String(payload.note)).toContain('confirm: true');
+    expectNoCalls(spies);
+    await harness.close();
+  });
+
+  it('treats confirm:false exactly like an absent confirm', async () => {
+    const { client, spies } = makeClient();
+    const harness = await harnessFor(client);
+    const result = await harness.callTool('kia_lock_doors', {
       vinKey: VIN_KEY,
       confirm: false,
     });
@@ -270,14 +257,14 @@ describe("confirm gate", () => {
     await harness.close();
   });
 
-  it("previews the exact rems/start body, including the temperature sentinel", async () => {
+  it('previews the exact rems/start body, including the temperature sentinel', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
 
     const numeric = parseToolResult<{
       willSend: { remoteClimate: Record<string, unknown> };
     }>(
-      await harness.callTool("kia_start_climate", {
+      await harness.callTool('kia_start_climate', {
         vinKey: VIN_KEY,
         temperature: 68,
         durationMinutes: 10,
@@ -285,42 +272,42 @@ describe("confirm gate", () => {
       }),
     );
     expect(numeric.willSend.remoteClimate).toMatchObject({
-      airTemp: { unit: 1, value: "68" },
+      airTemp: { unit: 1, value: '68' },
       airCtrl: true,
       defrost: true,
       ignitionOnDuration: { unit: 4, value: 10 },
     });
     // heatVentSeat is deliberately absent from the body.
-    expect(numeric.willSend.remoteClimate).not.toHaveProperty("heatVentSeat");
+    expect(numeric.willSend.remoteClimate).not.toHaveProperty('heatVentSeat');
 
     const low = parseToolResult<{
       willSend: { remoteClimate: { airTemp: { value: string } } };
     }>(
-      await harness.callTool("kia_start_climate", {
+      await harness.callTool('kia_start_climate', {
         vinKey: VIN_KEY,
-        temperature: "LOW",
+        temperature: 'LOW',
       }),
     );
-    expect(low.willSend.remoteClimate.airTemp.value).toBe("LOW");
+    expect(low.willSend.remoteClimate.airTemp.value).toBe('LOW');
 
     expectNoCalls(spies);
     await harness.close();
   });
 
-  it("omits a body from the preview for GET commands", async () => {
+  it('omits a body from the preview for GET commands', async () => {
     const { client } = makeClient();
     const harness = await harnessFor(client);
     const payload = parseToolResult<Record<string, unknown>>(
-      await harness.callTool("kia_stop_climate", { vinKey: VIN_KEY }),
+      await harness.callTool('kia_stop_climate', { vinKey: VIN_KEY }),
     );
-    expect(payload).not.toHaveProperty("willSend");
+    expect(payload).not.toHaveProperty('willSend');
     await harness.close();
   });
 
-  it("rejects a temperature outside 62-82 that is not LOW/HIGH", async () => {
+  it('rejects a temperature outside 62-82 that is not LOW/HIGH', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    const result = await harness.callTool("kia_start_climate", {
+    const result = await harness.callTool('kia_start_climate', {
       vinKey: VIN_KEY,
       temperature: 55,
     });
@@ -336,16 +323,16 @@ describe("confirm gate", () => {
    * integer failed with a bare "Invalid input at temperature" while the LOW/HIGH
    * sentinels — already strings — worked fine.
    */
-  it("accepts a string-encoded integer and normalises it to the numeric wire value", async () => {
+  it('accepts a string-encoded integer and normalises it to the numeric wire value', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
 
-    for (const sent of ["72", "62", "82"]) {
+    for (const sent of ['72', '62', '82']) {
       const preview = parseToolResult<{
         willSend: { remoteClimate: { airTemp: { value: string } } };
         action: string;
       }>(
-        await harness.callTool("kia_start_climate", {
+        await harness.callTool('kia_start_climate', {
           vinKey: VIN_KEY,
           temperature: sent,
         }),
@@ -359,33 +346,29 @@ describe("confirm gate", () => {
     await harness.close();
   });
 
-  it("still enforces the 62-82 range on a string-encoded integer", async () => {
+  it('still enforces the 62-82 range on a string-encoded integer', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    for (const sent of ["55", "99", "72.5", "warm", ""]) {
-      const result = await harness.callTool("kia_start_climate", {
+    for (const sent of ['55', '99', '72.5', 'warm', '']) {
+      const result = await harness.callTool('kia_start_climate', {
         vinKey: VIN_KEY,
         temperature: sent,
       });
-      expect(
-        result.isError,
-        `temperature ${JSON.stringify(sent)} must be rejected`,
-      ).toBe(true);
+      expect(result.isError, `temperature ${JSON.stringify(sent)} must be rejected`).toBe(true);
     }
     expectNoCalls(spies);
     await harness.close();
   });
 
-  it("advertises the string form in the published input schema", async () => {
+  it('advertises the string form in the published input schema', async () => {
     const { client } = makeClient();
     const harness = await harnessFor(client);
     // `harness.listTools()` is name-only; the underlying client returns the
     // full advertised definition, which is what a host actually reads.
     const { tools } = await harness.client.listTools();
-    const tool = tools.find((t) => t.name === "kia_start_climate");
+    const tool = tools.find((t) => t.name === 'kia_start_climate');
     const temperature = (
-      tool?.inputSchema as
-        { properties?: Record<string, { anyOf?: unknown[] }> } | undefined
+      tool?.inputSchema as { properties?: Record<string, { anyOf?: unknown[] }> } | undefined
     )?.properties?.temperature;
     // Assert the branch this fix ADDED. The pre-fix two-branch union already
     // published a `{"type":"string","enum":["LOW","HIGH"]}` entry, so a looser
@@ -394,25 +377,25 @@ describe("confirm gate", () => {
     // down which side of the Zod pipe is published (input, not output) — the
     // input side is the one a host reads to decide how to encode the value.
     expect(temperature?.anyOf).toContainEqual(
-      expect.objectContaining({ type: "string", pattern: "^\\d+$" }),
+      expect.objectContaining({ type: 'string', pattern: '^\\d+$' }),
     );
     await harness.close();
   });
 });
 
-describe("confirmed execution", () => {
-  it("locks, then reports acceptance and observed state separately", async () => {
+describe('confirmed execution', () => {
+  it('locks, then reports acceptance and observed state separately', async () => {
     const { client, spies } = makeClient();
     spies.verifyCommand.mockResolvedValue(
       verification({
         snapshot: { doorLock: true },
-        changedFields: ["doorLock"],
+        changedFields: ['doorLock'],
       }),
     );
     const harness = await harnessFor(client);
 
     const payload = parseToolResult<Record<string, unknown>>(
-      await harness.callTool("kia_lock_doors", {
+      await harness.callTool('kia_lock_doors', {
         vinKey: VIN_KEY,
         confirm: true,
       }),
@@ -425,18 +408,18 @@ describe("confirmed execution", () => {
     expect(payload.xid).toBe(XID);
     expect(payload.expected).toEqual({ doorLock: true });
     expect(payload.observed).toEqual({ doorLock: true });
-    expect(payload.changedFields).toEqual(["doorLock"]);
+    expect(payload.changedFields).toEqual(['doorLock']);
     expect(payload.attempts).toBe(2);
     expect(payload.elapsedSeconds).toBe(5.2);
-    expect(String(payload.verificationMethod)).toContain("cmm/gvi");
-    expect(String(payload.verificationMethod)).toContain("cmm/gts");
+    expect(String(payload.verificationMethod)).toContain('cmm/gvi');
+    expect(String(payload.verificationMethod)).toContain('cmm/gts');
     await harness.close();
   });
 
-  it("reads a baseline before commanding and hands it to verifyCommand", async () => {
+  it('reads a baseline before commanding and hands it to verifyCommand', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await harness.callTool("kia_lock_doors", {
+    await harness.callTool('kia_lock_doors', {
       vinKey: VIN_KEY,
       confirm: true,
     });
@@ -462,19 +445,16 @@ describe("confirmed execution", () => {
     await harness.close();
   });
 
-  it("passes a re-read function that digs out the nested vehicleStatus", async () => {
+  it('passes a re-read function that digs out the nested vehicleStatus', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await harness.callTool("kia_lock_doors", {
+    await harness.callTool('kia_lock_doors', {
       vinKey: VIN_KEY,
       confirm: true,
     });
 
-    const readFn = spies.verifyCommand.mock
-      .calls[0]?.[0] as () => Promise<KiaVehicleStatus | null>;
-    spies.getVehicleStatus.mockResolvedValueOnce(
-      vehicleInfo({ doorLock: true }),
-    );
+    const readFn = spies.verifyCommand.mock.calls[0]?.[0] as () => Promise<KiaVehicleStatus | null>;
+    spies.getVehicleStatus.mockResolvedValueOnce(vehicleInfo({ doorLock: true }));
     await expect(readFn()).resolves.toEqual({ doorLock: true });
 
     spies.getVehicleStatus.mockResolvedValueOnce(null);
@@ -483,9 +463,9 @@ describe("confirmed execution", () => {
   });
 
   it.each([
-    ["kia_lock_doors", true],
-    ["kia_unlock_doors", false],
-  ])("%s gates on doorLock === %s and nothing else", async (name, want) => {
+    ['kia_lock_doors', true],
+    ['kia_unlock_doors', false],
+  ])('%s gates on doorLock === %s and nothing else', async (name, want) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await harness.callTool(name, { vinKey: VIN_KEY, confirm: true });
@@ -501,9 +481,9 @@ describe("confirmed execution", () => {
   });
 
   it.each([
-    ["kia_start_climate", true],
-    ["kia_stop_climate", false],
-  ])("%s gates on the NESTED climate.airCtrl === %s", async (name, want) => {
+    ['kia_start_climate', true],
+    ['kia_stop_climate', false],
+  ])('%s gates on the NESTED climate.airCtrl === %s', async (name, want) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await harness.callTool(name, { vinKey: VIN_KEY, confirm: true });
@@ -519,27 +499,27 @@ describe("confirmed execution", () => {
     await harness.close();
   });
 
-  it("reports every proof field for climate, including ign3, with nulls when absent", async () => {
+  it('reports every proof field for climate, including ign3, with nulls when absent', async () => {
     const { client, spies } = makeClient();
     spies.verifyCommand.mockResolvedValue(
-      verification({ snapshot: { ign3: true }, changedFields: ["ign3"] }),
+      verification({ snapshot: { ign3: true }, changedFields: ['ign3'] }),
     );
     const harness = await harnessFor(client);
     const payload = parseToolResult<Record<string, unknown>>(
-      await harness.callTool("kia_start_climate", {
+      await harness.callTool('kia_start_climate', {
         vinKey: VIN_KEY,
         confirm: true,
       }),
     );
-    expect(payload.expected).toEqual({ "climate.airCtrl": true });
-    expect(payload.observed).toEqual({ "climate.airCtrl": null, ign3: true });
+    expect(payload.expected).toEqual({ 'climate.airCtrl': true });
+    expect(payload.observed).toEqual({ 'climate.airCtrl': null, ign3: true });
     await harness.close();
   });
 
-  it("forwards climate options to the client", async () => {
+  it('forwards climate options to the client', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await harness.callTool("kia_start_climate", {
+    await harness.callTool('kia_start_climate', {
       vinKey: VIN_KEY,
       confirm: true,
       temperature: 72,
@@ -554,21 +534,21 @@ describe("confirmed execution", () => {
     await harness.close();
   });
 
-  it("forwards the LOW/HIGH sentinel unchanged", async () => {
+  it('forwards the LOW/HIGH sentinel unchanged', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await harness.callTool("kia_start_climate", {
+    await harness.callTool('kia_start_climate', {
       vinKey: VIN_KEY,
       confirm: true,
-      temperature: "HIGH",
+      temperature: 'HIGH',
     });
     expect(spies.startClimate.mock.calls[0]?.[1]).toMatchObject({
-      airTempF: "HIGH",
+      airTempF: 'HIGH',
     });
     await harness.close();
   });
 
-  it("never claims success when the state change was not observed", async () => {
+  it('never claims success when the state change was not observed', async () => {
     const { client, spies } = makeClient();
     spies.verifyCommand.mockResolvedValue(
       verification({
@@ -579,7 +559,7 @@ describe("confirmed execution", () => {
       }),
     );
     const harness = await harnessFor(client);
-    const result = await harness.callTool("kia_unlock_doors", {
+    const result = await harness.callTool('kia_unlock_doors', {
       vinKey: VIN_KEY,
       confirm: true,
     });
@@ -588,64 +568,58 @@ describe("confirmed execution", () => {
     expect(result.isError).toBeFalsy();
     expect(payload.commandAccepted).toBe(true);
     expect(payload.stateConfirmed).toBe(false);
-    expect(String(payload.note)).toContain("NOT");
+    expect(String(payload.note)).toContain('NOT');
     expect(String(payload.note)).toMatch(/not.*(done|confirmed)/i);
     await harness.close();
   });
 
-  it("honours waitSeconds, including 0 for fire-and-check-once", async () => {
+  it('honours waitSeconds, including 0 for fire-and-check-once', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await harness.callTool("kia_stop_climate", {
+    await harness.callTool('kia_stop_climate', {
       vinKey: VIN_KEY,
       confirm: true,
       waitSeconds: 0,
     });
-    expect(
-      (spies.verifyCommand.mock.calls[0]?.[2] as { timeoutMs: number })
-        .timeoutMs,
-    ).toBe(0);
+    expect((spies.verifyCommand.mock.calls[0]?.[2] as { timeoutMs: number }).timeoutMs).toBe(0);
 
-    await harness.callTool("kia_stop_climate", {
+    await harness.callTool('kia_stop_climate', {
       vinKey: VIN_KEY,
       confirm: true,
       waitSeconds: 30,
     });
-    expect(
-      (spies.verifyCommand.mock.calls[1]?.[2] as { timeoutMs: number })
-        .timeoutMs,
-    ).toBe(30_000);
+    expect((spies.verifyCommand.mock.calls[1]?.[2] as { timeoutMs: number }).timeoutMs).toBe(
+      30_000,
+    );
     await harness.close();
   });
 
-  it("refuses to command a vehicle Kia does not return, before any mutation", async () => {
+  it('refuses to command a vehicle Kia does not return, before any mutation', async () => {
     const { client, spies } = makeClient();
     spies.getVehicleStatus.mockResolvedValue(null);
     const harness = await harnessFor(client);
-    const result = await harness.callTool("kia_lock_doors", {
-      vinKey: "FAKE-UNKNOWN-KEY",
+    const result = await harness.callTool('kia_lock_doors', {
+      vinKey: 'FAKE-UNKNOWN-KEY',
       confirm: true,
     });
 
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("FAKE-UNKNOWN-KEY");
+    expect(textOf(result)).toContain('FAKE-UNKNOWN-KEY');
     expect(spies.lockDoors).not.toHaveBeenCalled();
     expect(spies.verifyCommand).not.toHaveBeenCalled();
     await harness.close();
   });
 
-  it("surfaces an upstream command failure as a tool error", async () => {
+  it('surfaces an upstream command failure as a tool error', async () => {
     const { client, spies } = makeClient();
-    spies.stopClimate.mockRejectedValue(
-      new Error("Kia API error on rems/stop: boom"),
-    );
+    spies.stopClimate.mockRejectedValue(new Error('Kia API error on rems/stop: boom'));
     const harness = await harnessFor(client);
-    const result = await harness.callTool("kia_stop_climate", {
+    const result = await harness.callTool('kia_stop_climate', {
       vinKey: VIN_KEY,
       confirm: true,
     });
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("rems/stop");
+    expect(textOf(result)).toContain('rems/stop');
     await harness.close();
   });
 });
