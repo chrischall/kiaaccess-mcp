@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.9.0...v1.0.0) (2026-09-20)
+
+
+### Features
+
+* **deps:** take mcp-utils 1.0.0, so the child boots through serveStdio ([#93](https://github.com/chrischall/kiaaccess-mcp/issues/93)) ([f14fd15](https://github.com/chrischall/kiaaccess-mcp/commit/f14fd15e7a70c6549c8be95700e49a23478b98ae))
+
+
+### Bug Fixes
+
+* **release:** drop bump-minor-pre-major so a breaking change cuts a major ([#95](https://github.com/chrischall/kiaaccess-mcp/issues/95)) ([72d7884](https://github.com/chrischall/kiaaccess-mcp/commit/72d788430cda4fcf370d66560408e45f1a7e1c43))
+
 ## [0.9.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.8.2...v0.9.0) (2026-09-17)
 
 
