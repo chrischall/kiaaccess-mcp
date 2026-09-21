@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.0...v1.0.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **tools:** annotate the credential and MFA tools; leave the car commands alone ([#96](https://github.com/chrischall/kiaaccess-mcp/issues/96)) ([2e256f6](https://github.com/chrischall/kiaaccess-mcp/commit/2e256f6dd42ea854610d4a2cec77dc1470e551b9))
+
 ## [1.0.0](https://github.com/chrischall/kiaaccess-mcp/compare/v0.9.0...v1.0.0) (2026-09-20)
 
 
