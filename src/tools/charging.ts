@@ -207,6 +207,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         readOnly: false,
         idempotent: true,
         openWorld: true,
+        destructive: false,
       }),
       inputSchema: z.object({
         vinKey: schemaVinKey,
@@ -253,6 +254,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         readOnly: false,
         idempotent: true,
         openWorld: true,
+        destructive: false,
       }),
       inputSchema: z.object({ vinKey: schemaVinKey, confirm: schemaConfirm }),
     },
@@ -288,6 +290,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         readOnly: false,
         idempotent: true,
         openWorld: true,
+        destructive: false,
       }),
       inputSchema: z.object({
         vinKey: schemaVinKey,
