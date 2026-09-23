@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.2...v1.0.3) (2026-09-23)
+
+
+### Bug Fixes
+
+* **commands:** return an honest result when a command call is cancelled before or during the send ([#108](https://github.com/chrischall/kiaaccess-mcp/issues/108)) ([53cc615](https://github.com/chrischall/kiaaccess-mcp/commit/53cc615e4ba09d4cd471c1efc64f126177628b30))
+* latch Kia credential rejections and make command verification cancellable ([#105](https://github.com/chrischall/kiaaccess-mcp/issues/105)) ([60c0385](https://github.com/chrischall/kiaaccess-mcp/commit/60c03857d44b928ee30e2dfa941b255b67513efd))
+
 ## [1.0.2](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.1...v1.0.2) (2026-09-23)
 
 
