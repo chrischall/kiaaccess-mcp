@@ -23,6 +23,7 @@ import type { McpServer, CallToolResult } from '@modelcontextprotocol/server';
 import {
   McpToolError,
   SafePathSegment,
+  currentCallSignal,
   minifiedResult,
   readEnvVar,
   schemaConfirm,
@@ -34,6 +35,7 @@ import {
   type KiaCommandResult,
   type KiaVehicleStatus,
   type StartClimateOptions,
+  type VerifyCommandResult,
   buildStartClimateBody,
   extractVehicleStatus,
 } from '../client.js';
@@ -246,12 +248,26 @@ async function runCommand(
 ): Promise<CallToolResult> {
   const spec = COMMAND_SPECS[plan.command];
   const { vinKey, waitSeconds } = args;
+  // The running tool call's cancellation. verifyCommand already stops its poll
+  // loop on it; the steps around that loop must turn a cancellation into an
+  // honest result too, rather than an exception that hides whether the command
+  // reached the car. A failure while the signal is aborted is treated as the
+  // cancellation (fetch rejects with it, possibly wrapped); any other failure
+  // still throws.
+  const signal = currentCallSignal();
+  const cancelledNow = (): boolean => signal?.aborted === true;
 
   // Baseline first: it is both the diff reference and a cheap check that this
   // vinKey exists — better to fail here than to fire a command at nothing.
-  const baselineInfo = await client.getVehicleStatus(vinKey, {
-    includeClimate: true,
-  });
+  let baselineInfo: Awaited<ReturnType<KiaCommandsClient['getVehicleStatus']>>;
+  try {
+    baselineInfo = await client.getVehicleStatus(vinKey, { includeClimate: true });
+  } catch (error) {
+    if (cancelledNow()) return cancelledBeforeSend(plan, vinKey);
+    throw error;
+  }
+  // Never fire a command for a caller that has already gone.
+  if (cancelledNow()) return cancelledBeforeSend(plan, vinKey);
   if (baselineInfo === null) {
     throw new McpToolError(
       `Kia returned no vehicle record for vinKey "${vinKey}" — no command was sent.`,
@@ -262,15 +278,37 @@ async function runCommand(
   }
   const baseline = extractVehicleStatus(baselineInfo);
 
-  const result = await invoke();
+  let result: KiaCommandResult;
+  try {
+    result = await invoke();
+  } catch (error) {
+    if (cancelledNow()) return cancelledDuringSend(plan, vinKey, spec.proofFields, baseline);
+    throw error;
+  }
 
-  const verification = await client.verifyCommand<KiaVehicleStatus | null>(
-    async () =>
-      extractVehicleStatus(await client.getVehicleStatus(vinKey, { includeClimate: true })),
-    (snapshot) =>
-      Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want),
-    { baseline, timeoutMs: waitSeconds * 1000 },
-  );
+  let verification: VerifyCommandResult<KiaVehicleStatus | null>;
+  try {
+    verification = await client.verifyCommand<KiaVehicleStatus | null>(
+      async () =>
+        extractVehicleStatus(await client.getVehicleStatus(vinKey, { includeClimate: true })),
+      (snapshot) =>
+        Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want),
+      { baseline, timeoutMs: waitSeconds * 1000 },
+    );
+  } catch (error) {
+    // A re-read aborted mid-flight. The command itself was sent and accepted,
+    // so report exactly that — with no observed state — instead of an error
+    // that reads as "the command failed" and invites a re-send.
+    if (!cancelledNow()) throw error;
+    verification = {
+      verified: false,
+      attempts: 0,
+      elapsedMs: 0,
+      snapshot: null,
+      changedFields: [],
+      cancelled: true,
+    };
+  }
 
   return minifiedResult({
     action: plan.action,
@@ -286,6 +324,7 @@ async function runCommand(
     xid: result.xid,
     /** The re-read actually showed the expected state. This is the real proof. */
     stateConfirmed: verification.verified,
+    cancelled: verification.cancelled,
     expected: plan.expect,
     observed: observeProof(verification.snapshot, spec.proofFields),
     baselineObserved: observeProof(baseline, spec.proofFields),
@@ -299,6 +338,51 @@ async function runCommand(
         `was NOT observed within ${waitSeconds}s${verification.cancelled ? ' (verification was cancelled)' : ''}. ` +
         'Changes were observed to take 30–60s, so it may still land — re-read the vehicle status before saying ' +
         'anything about the car, and do not send it again. Do not report this as done.',
+  });
+}
+
+/** Cancelled before the command request went out: nothing reached the car. */
+function cancelledBeforeSend(plan: CommandPlan, vinKey: string): CallToolResult {
+  return minifiedResult({
+    action: plan.action,
+    command: plan.command,
+    vinKey,
+    cancelled: true,
+    commandSent: false,
+    commandAccepted: false,
+    stateConfirmed: false,
+    expected: plan.expect,
+    note:
+      'The call was cancelled before the command was sent — the command was NOT sent and the vehicle was not ' +
+      'touched. Run it again with confirm: true if it is still wanted.',
+  });
+}
+
+/**
+ * Cancelled while the command request was in flight: it may or may not have
+ * reached Kia, so claiming either would be a guess.
+ */
+function cancelledDuringSend(
+  plan: CommandPlan,
+  vinKey: string,
+  proofFields: readonly string[],
+  baseline: KiaVehicleStatus | null,
+): CallToolResult {
+  return minifiedResult({
+    action: plan.action,
+    command: plan.command,
+    vinKey,
+    cancelled: true,
+    /** The request was in flight when the call was cancelled. */
+    commandSent: 'unknown',
+    commandAccepted: 'unknown',
+    stateConfirmed: false,
+    expected: plan.expect,
+    baselineObserved: observeProof(baseline, proofFields),
+    note:
+      'The call was cancelled while the command request was in flight, so it may have reached Kia and may still ' +
+      `take effect (${describeExpectation(plan.expect)}). Re-read the vehicle status before sending it again, and ` +
+      'do not report this as done.',
   });
 }
 
