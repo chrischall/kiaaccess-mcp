@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.2](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.1...v1.0.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv from 17.4.2 to 18.0.0 ([#101](https://github.com/chrischall/kiaaccess-mcp/issues/101)) ([255326b](https://github.com/chrischall/kiaaccess-mcp/commit/255326b318e998d461ade847222a385eeadafc18))
+* **deps:** bump zod in the production-dependencies group ([#100](https://github.com/chrischall/kiaaccess-mcp/issues/100)) ([13014c9](https://github.com/chrischall/kiaaccess-mcp/commit/13014c963db23b06cf58ef20b937d63bf8a08dad))
+* **deps:** require zod ^4.6.5 to match @chrischall/mcp-utils 2.4.0 ([#104](https://github.com/chrischall/kiaaccess-mcp/issues/104)) ([ee62c47](https://github.com/chrischall/kiaaccess-mcp/commit/ee62c470f89edac0c7b37a848eec8c9651e564b5))
+* **deps:** upgrade @chrischall/mcp-utils to 2.4.0 and @fetchproxy/* to 3.2.0 ([#103](https://github.com/chrischall/kiaaccess-mcp/issues/103)) ([322d087](https://github.com/chrischall/kiaaccess-mcp/commit/322d087d64c775172e515418c07e3e0ce1cca8b8))
+
 ## [1.0.1](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.0...v1.0.1) (2026-09-21)
 
 
