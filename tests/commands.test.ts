@@ -784,4 +784,28 @@ describe('cancellation outside the poll loop', () => {
       withCallSignal(controller.signal, () => handler!({ vinKey: VIN_KEY, waitSeconds: 30, confirm: true })),
     ).rejects.toThrow('rems/door/lock');
   });
+
+  it('still surfaces a baseline-read failure that is not a cancellation', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.getVehicleStatus.mockRejectedValue(new Error('Kia API error on vehicle status: boom'));
+    const handler = captureHandlers(client).get('kia_lock_doors');
+    await expect(
+      withCallSignal(controller.signal, () => handler!({ vinKey: VIN_KEY, waitSeconds: 30, confirm: true })),
+    ).rejects.toThrow('vehicle status: boom');
+    expect(controller.signal.aborted).toBe(false);
+    expect(spies.lockDoors).not.toHaveBeenCalled();
+  });
+
+  it('still surfaces a verification failure that is not a cancellation', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.verifyCommand.mockRejectedValue(new Error('verification blew up'));
+    const handler = captureHandlers(client).get('kia_lock_doors');
+    await expect(
+      withCallSignal(controller.signal, () => handler!({ vinKey: VIN_KEY, waitSeconds: 30, confirm: true })),
+    ).rejects.toThrow('verification blew up');
+    expect(controller.signal.aborted).toBe(false);
+    expect(spies.lockDoors).toHaveBeenCalledTimes(1);
+  });
 });
