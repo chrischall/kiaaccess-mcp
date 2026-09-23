@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpToolError, loadDotenvSafely, readEnvVar } from '@chrischall/mcp-utils';
 import {
+  KiaCredentialError,
   type KiaCredentials,
   type OtpNotifyType,
   type SendOtpResult,
@@ -352,6 +353,13 @@ export class KiaClient {
   private cachedDeviceId: string | undefined;
   private cachedRmToken: string | null | undefined;
   private cachedSids: SidManager | undefined;
+  /**
+   * A credential rejection from a `sid` mint, latched for the life of the
+   * session. See {@link sids}: without it every later tool call would resend
+   * the same rejected password, each one a failed login towards Kia's
+   * permanent reCAPTCHA escalation.
+   */
+  private credentialRejection: KiaCredentialError | undefined;
 
   // Session-scoped vinkey state — see `resolveSessionVinKey`. `vinByVehicleKey`
   // is NOT session-scoped on purpose: it is how a key from a dead session is
@@ -487,6 +495,7 @@ export class KiaClient {
     this.sessionIO.clear(this.accountId);
     this.cachedRmToken = undefined;
     this.cachedSids = undefined;
+    this.credentialRejection = undefined;
   }
 
   private adoptRmToken(rmtoken: string): void {
@@ -500,16 +509,32 @@ export class KiaClient {
     });
   }
 
-  /** Single-flight `sid` minting, built on first use. */
+  /**
+   * Single-flight `sid` minting, built on first use.
+   *
+   * Every mint re-sends the password (`prof/authUser` carries the credentials
+   * alongside the `rmtoken`), so a {@link KiaCredentialError} is LATCHED: later
+   * calls rethrow it without touching the network. "Never retried" has to hold
+   * across tool calls, not just within one — otherwise a model retrying, or a
+   * healthcheck, spends another failed login each time. The latch clears only
+   * when the session is re-established ({@link forgetSession} or a completed
+   * {@link completeLogin}); the password itself cannot change without a restart.
+   */
   private get sids(): SidManager {
     return (this.cachedSids ??= new SidManager({
       ttlMs: this.opts.sidTtlMs,
       mint: async () => {
+        if (this.credentialRejection) throw this.credentialRejection;
         const credentials = this.requireCredentials();
         const rmtoken = this.requireRmToken();
-        const result = await refreshSession(rmtoken, credentials, this.deviceId, { fetchImpl: this.opts.fetchImpl });
-        this.adoptRmToken(result.rmtoken);
-        return result.sid;
+        try {
+          const result = await refreshSession(rmtoken, credentials, this.deviceId, { fetchImpl: this.opts.fetchImpl });
+          this.adoptRmToken(result.rmtoken);
+          return result.sid;
+        } catch (err) {
+          if (err instanceof KiaCredentialError) this.credentialRejection = err;
+          throw err;
+        }
       },
     }));
   }
@@ -541,8 +566,10 @@ export class KiaClient {
     this.requireCredentials();
     const { rmtoken } = await verifyOtp(args, this.deviceId, { fetchImpl: this.opts.fetchImpl });
     this.adoptRmToken(rmtoken);
-    // Drop any SidManager built against the previous token.
+    // Drop any SidManager built against the previous token, and any credential
+    // rejection latched under it: Kia just accepted this account again.
     this.cachedSids = undefined;
+    this.credentialRejection = undefined;
     return { accountId: this.accountId, deviceId: this.deviceId, persisted: true };
   }
 

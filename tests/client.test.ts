@@ -264,6 +264,69 @@ describe('sid minting', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('latches a credential rejection so LATER calls do not resend the rejected password', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      {
+        body: {
+          status: { statusCode: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' },
+          payload: { loginAttempt: 1 },
+        },
+      },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    // A second tool call (a model retry, a healthcheck, another read) must
+    // rethrow the same rejection locally: each resend is one more failed login
+    // towards Kia's permanent reCAPTCHA escalation.
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    await expect(client.getVehicleStatus(VIN_KEY)).rejects.toBeInstanceOf(KiaCredentialError);
+    expect(calls.filter((c) => c.url.endsWith('prof/authUser'))).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('clears the latched rejection when the session is forgotten', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      { body: { status: { statusCode: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' } } },
+      AUTH_OK,
+      { body: { status: OK, payload: { vehicleSummary: [] } } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    client.forgetSession();
+    await expect(client.listVehicles()).resolves.toEqual([]);
+    expect(calls).toHaveLength(3);
+  });
+
+  it('clears the latched rejection after a fresh MFA bootstrap completes', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      { body: { status: { statusCode: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' } } },
+      { headers: { sid: SID, rmtoken: 'fake-rmtoken-new' }, body: { status: OK } },
+      AUTH_OK,
+      { body: { status: OK, payload: { vehicleSummary: [] } } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    await client.completeLogin({ otpKey: 'fake-otp-key', xid: 'fake-xid', otp: '000000' });
+    await expect(client.listVehicles()).resolves.toEqual([]);
+    expect(calls).toHaveLength(4);
+  });
+
+  it('does not latch a non-credential mint failure', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      { body: { status: { statusCode: 1, errorCode: 9999, errorMessage: 'Temporary outage' } } },
+      AUTH_OK,
+      { body: { status: OK, payload: { vehicleSummary: [] } } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toThrow(/outage/);
+    await expect(client.listVehicles()).resolves.toEqual([]);
+    expect(calls).toHaveLength(3);
+  });
+
   it('re-mints and replays exactly once when a call reports an expired session', async () => {
     const { fetchImpl, calls } = stubFetch([
       AUTH_OK,

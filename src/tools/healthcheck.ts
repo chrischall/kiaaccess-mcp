@@ -30,8 +30,11 @@ class KiaNoSessionError extends Error {
  * invalidated looks identical to a healthy one there.
  *
  * The probe is `listVehicles()` — the cheapest authenticated read — reached
- * through the stored remember-me token, which refreshes a session silently and
- * is NOT a sign-in attempt.
+ * through the stored remember-me token, which refreshes a session without MFA.
+ * That refresh (`prof/authUser`) DOES send the configured password alongside
+ * the token, so a wrong password counts as a failed sign-in. It is spent at
+ * most once per session: `KiaClient` latches a credential rejection, and every
+ * later probe rethrows it locally without contacting Kia.
  */
 export function registerHealthcheckTools(server: McpServer, client: KiaClient): void {
   registerCredentialHealthcheckTool({
