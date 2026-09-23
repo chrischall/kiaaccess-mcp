@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { textResult } from '@chrischall/mcp-utils';
+import { textResult, withCallSignal } from '@chrischall/mcp-utils';
 import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import type {
@@ -665,5 +665,123 @@ describe('confirmed execution', () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('rems/stop');
     await harness.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cancellation outside verifyCommand's poll loop
+// ---------------------------------------------------------------------------
+
+type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
+
+/**
+ * Capture the registered handlers directly so a call can run inside an
+ * ambient cancellation signal (`withCallSignal`) — through the harness, a
+ * cancelled request never delivers its result back to the test.
+ */
+function captureHandlers(client: KiaCommandsClient): Map<string, ToolHandler> {
+  const handlers = new Map<string, ToolHandler>();
+  const fakeServer = {
+    registerTool: (name: string, _config: unknown, handler: ToolHandler) => {
+      handlers.set(name, handler);
+    },
+  };
+  registerCommandsTools(fakeServer as unknown as Parameters<typeof registerCommandsTools>[0], client);
+  return handlers;
+}
+
+function abortError(): Error {
+  return Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+}
+
+/** Run the lock tool with confirm:true under a signal the test controls. */
+async function lockUnder(
+  controller: AbortController,
+  client: KiaCommandsClient,
+): Promise<Record<string, unknown>> {
+  const handler = captureHandlers(client).get('kia_lock_doors');
+  if (handler === undefined) throw new Error('kia_lock_doors not registered');
+  const result = await withCallSignal(controller.signal, () =>
+    handler({ vinKey: VIN_KEY, waitSeconds: 30, confirm: true }),
+  );
+  expect(result.isError).toBeFalsy();
+  return parseToolResult<Record<string, unknown>>(result);
+}
+
+describe('cancellation outside the poll loop', () => {
+  it('returns a not-sent result when cancelled during the baseline read', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.getVehicleStatus.mockImplementation(async () => {
+      controller.abort();
+      throw abortError();
+    });
+    const payload = await lockUnder(controller, client);
+
+    expect(payload.cancelled).toBe(true);
+    expect(payload.commandSent).toBe(false);
+    expect(payload.stateConfirmed).toBe(false);
+    expect(String(payload.note)).toMatch(/NOT sent/);
+    expect(spies.lockDoors).not.toHaveBeenCalled();
+    expect(spies.verifyCommand).not.toHaveBeenCalled();
+  });
+
+  it('does not fire the command when cancelled after the baseline read', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.getVehicleStatus.mockImplementation(async () => {
+      controller.abort();
+      return vehicleInfo({ doorLock: false });
+    });
+    const payload = await lockUnder(controller, client);
+
+    expect(payload.cancelled).toBe(true);
+    expect(payload.commandSent).toBe(false);
+    expect(spies.lockDoors).not.toHaveBeenCalled();
+    expect(spies.verifyCommand).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown send state when cancelled during the command request', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.lockDoors.mockImplementation(async () => {
+      controller.abort();
+      throw abortError();
+    });
+    const payload = await lockUnder(controller, client);
+
+    expect(payload.cancelled).toBe(true);
+    expect(payload.commandSent).toBe('unknown');
+    expect(payload.stateConfirmed).toBe(false);
+    expect(String(payload.note)).toMatch(/may have reached Kia/);
+    expect(String(payload.note)).toMatch(/re-read the vehicle status/i);
+    expect(spies.verifyCommand).not.toHaveBeenCalled();
+  });
+
+  it('keeps commandSent:true when cancellation lands during a verification re-read', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.verifyCommand.mockImplementation(async () => {
+      controller.abort();
+      throw abortError();
+    });
+    const payload = await lockUnder(controller, client);
+
+    expect(payload.cancelled).toBe(true);
+    expect(payload.commandSent).toBe(true);
+    expect(payload.commandAccepted).toBe(true);
+    expect(payload.xid).toBe(XID);
+    expect(payload.stateConfirmed).toBe(false);
+    expect(String(payload.note)).toMatch(/do not send it again/i);
+  });
+
+  it('still surfaces a failure that is not a cancellation as a tool error', async () => {
+    const { client, spies } = makeClient();
+    const controller = new AbortController();
+    spies.lockDoors.mockRejectedValue(new Error('Kia API error on rems/door/lock: boom'));
+    const handler = captureHandlers(client).get('kia_lock_doors');
+    await expect(
+      withCallSignal(controller.signal, () => handler!({ vinKey: VIN_KEY, waitSeconds: 30, confirm: true })),
+    ).rejects.toThrow('rems/door/lock');
   });
 });
