@@ -22,7 +22,7 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { McpToolError, loadDotenvSafely, readEnvVar } from '@chrischall/mcp-utils';
+import { McpToolError, currentCallSignal, loadDotenvSafely, readEnvVar, reportProgress } from '@chrischall/mcp-utils';
 import {
   KiaCredentialError,
   type KiaCredentials,
@@ -283,8 +283,14 @@ export interface VerifyCommandOptions<T> {
   timeoutMs?: number;
   /** Delay between re-reads (default 5s). */
   intervalMs?: number;
-  /** Injectable for tests. */
-  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Stop polling when this aborts. Defaults to the running tool call's
+   * cancellation, so a caller that cancelled or timed out does not leave this
+   * loop hitting Kia for up to the whole wait budget.
+   */
+  signal?: AbortSignal;
+  /** Injectable for tests. Receives {@link signal} so it can wake early. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Injectable clock for tests. */
   now?: () => number;
 }
@@ -299,9 +305,24 @@ export interface VerifyCommandResult<T> {
   snapshot: T;
   /** Fields that changed vs. the baseline, `syncDate` excluded. */
   changedFields: string[];
+  /** Polling stopped early because the caller cancelled. */
+  cancelled: boolean;
 }
 
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Sleep that resolves early (never rejects) when `signal` aborts. Only ever
+ * called with a signal that has not yet aborted — the poll loop checks first.
+ */
+const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
 
 // ---------------------------------------------------------------------------
 // Client
@@ -862,6 +883,7 @@ export class KiaClient {
     const intervalMs = opts.intervalMs ?? 5_000;
     const sleep = opts.sleep ?? defaultSleep;
     const now = opts.now ?? Date.now;
+    const signal = opts.signal ?? currentCallSignal();
     const started = now();
 
     let snapshot = await readFn();
@@ -869,8 +891,15 @@ export class KiaClient {
     const baseline = opts.baseline ?? snapshot;
     let verified = predicate(snapshot);
 
-    while (!verified && now() - started + intervalMs <= timeoutMs) {
-      await sleep(intervalMs);
+    while (!verified && !signal?.aborted && now() - started + intervalMs <= timeoutMs) {
+      await sleep(intervalMs, signal);
+      if (signal?.aborted) break;
+      // Keep a progress-aware client informed while the car catches up. A
+      // no-op unless the caller sent a progressToken; a failed notification
+      // must never cost the verification result.
+      await reportProgress(now() - started, timeoutMs, `Waiting for the vehicle to confirm (read ${attempts + 1})`).catch(
+        () => undefined,
+      );
       snapshot = await readFn();
       attempts += 1;
       verified = predicate(snapshot);
@@ -882,6 +911,7 @@ export class KiaClient {
       elapsedMs: now() - started,
       snapshot,
       changedFields: diffIgnoringSyncDate(baseline, snapshot),
+      cancelled: signal?.aborted === true,
     };
   }
 }

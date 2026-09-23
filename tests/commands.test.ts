@@ -57,6 +57,7 @@ function verification(
     elapsedMs: 5200,
     snapshot: { doorLock: true },
     changedFields: ['doorLock'],
+    cancelled: false,
     ...overrides,
   };
 }
@@ -441,7 +442,50 @@ describe('confirmed execution', () => {
       ign3: false,
       climate: { airCtrl: false },
     });
-    expect(opts.timeoutMs).toBe(60_000);
+    // 30s, not 60s: baseline + command + a 60s poll outlasts the MCP SDK
+    // client's default 60s request timeout, and a timed-out command looks
+    // "failed" to a model that may then fire it again.
+    expect(opts.timeoutMs).toBe(30_000);
+    await harness.close();
+  });
+
+  it('says outright that an unconfirmed command WAS sent and must not be re-sent', async () => {
+    const { client, spies } = makeClient();
+    spies.verifyCommand.mockResolvedValue(
+      verification({ verified: false, attempts: 7, snapshot: { doorLock: true }, changedFields: [] }),
+    );
+    const harness = await harnessFor(client);
+    const result = await harness.callTool('kia_unlock_doors', { vinKey: VIN_KEY, confirm: true });
+    const payload = parseToolResult<Record<string, unknown>>(result);
+
+    expect(payload.commandSent).toBe(true);
+    expect(String(payload.note)).toMatch(/WAS sent/);
+    expect(String(payload.note)).toMatch(/do not send it again/i);
+    await harness.close();
+  });
+
+  it('notes when verification stopped because the caller cancelled', async () => {
+    const { client, spies } = makeClient();
+    spies.verifyCommand.mockResolvedValue(
+      verification({ verified: false, attempts: 1, snapshot: { doorLock: true }, changedFields: [], cancelled: true }),
+    );
+    const harness = await harnessFor(client);
+    const payload = parseToolResult<Record<string, unknown>>(
+      await harness.callTool('kia_unlock_doors', { vinKey: VIN_KEY, confirm: true }),
+    );
+    expect(String(payload.note)).toContain('verification was cancelled');
+    await harness.close();
+  });
+
+  it('advertises the lower default wait in the input schema', async () => {
+    const { client } = makeClient();
+    const harness = await harnessFor(client);
+    const { tools } = await harness.client.listTools();
+    const lock = tools.find((tool) => tool.name === 'kia_lock_doors');
+    const wait = (lock?.inputSchema as { properties: Record<string, { default?: unknown; description?: string }> })
+      .properties.waitSeconds;
+    expect(wait.default).toBe(30);
+    expect(wait.description).toMatch(/default 30/);
     await harness.close();
   });
 
