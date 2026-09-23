@@ -96,10 +96,13 @@ const waitSecondsArg = z
   .int()
   .min(0)
   .max(300)
-  .default(60)
+  .default(30)
   .describe(
-    'How long to keep re-reading cmm/gvi for proof the command landed (default 60). Observed changes took ' +
-      '30–60s. 0 checks once and returns immediately — the command may still land afterwards.',
+    'How long to keep re-reading cmm/gvi for proof the command landed (default 30). Observed changes took ' +
+      '30–60s, so an unconfirmed result is common — re-read the vehicle status rather than re-sending the ' +
+      'command. Values above ~45 can outlast an MCP client\'s own request timeout (often 60s), which then ' +
+      'reports a failure for a command that WAS sent. 0 checks once and returns immediately — the command may ' +
+      'still land afterwards.',
   );
 
 /** Every command tool takes the same three arguments plus its own options. */
@@ -276,6 +279,8 @@ async function runCommand(
     path: result.path,
     vinKey,
     endpointVerified: result.verified,
+    /** The command reached Kia. It must never be re-sent to "retry" verification. */
+    commandSent: true,
     /** Kia accepted the request (`status.statusCode === 0`). Nothing more. */
     commandAccepted: true,
     xid: result.xid,
@@ -290,9 +295,10 @@ async function runCommand(
     verificationMethod: NO_GTS_NOTE,
     note: verification.verified
       ? `Kia accepted the command AND the re-read confirms it: ${describeExpectation(plan.expect)}.`
-      : `Kia ACCEPTED the command, but the expected state (${describeExpectation(plan.expect)}) was NOT observed ` +
-        `within ${waitSeconds}s. Changes were observed to take 30–60s, so it may still land — re-read the vehicle ` +
-        'status before saying anything about the car. Do not report this as done.',
+      : `The command WAS sent and Kia ACCEPTED it, but the expected state (${describeExpectation(plan.expect)}) ` +
+        `was NOT observed within ${waitSeconds}s${verification.cancelled ? ' (verification was cancelled)' : ''}. ` +
+        'Changes were observed to take 30–60s, so it may still land — re-read the vehicle status before saying ' +
+        'anything about the car, and do not send it again. Do not report this as done.',
   });
 }
 

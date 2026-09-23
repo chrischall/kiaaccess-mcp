@@ -10,7 +10,7 @@
  * import cycle.
  */
 
-import { McpToolError, truncateErrorMessage } from '@chrischall/mcp-utils';
+import { McpToolError, currentCallSignal, truncateErrorMessage } from '@chrischall/mcp-utils';
 
 /** API root. Ends in `/` so endpoint paths concatenate directly. */
 export const BASE_URL = 'https://api.owners.kia.com/apigw/v1/';
@@ -305,6 +305,11 @@ export interface KiaRequestInit {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /**
+   * The running tool call's cancellation, when there is one. A cancelled or
+   * timed-out call must not leave its Kia request in flight.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -342,10 +347,14 @@ export async function sendKiaRequest(
   },
 ): Promise<KiaRawResponse> {
   const fetchImpl = opts.fetchImpl ?? defaultFetch;
+  // Ambient, so every call site — auth, reads, commands — honours the caller
+  // going away without threading a signal through each of them.
+  const signal = currentCallSignal();
   const response = await fetchImpl(`${BASE_URL}${path}`, {
     method: opts.method,
     headers: opts.headers,
     ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
+    ...(signal === undefined ? {} : { signal }),
   });
   const text = await response.text();
   try {

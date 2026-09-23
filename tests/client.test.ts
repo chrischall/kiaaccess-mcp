@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withCallSignal } from '@chrischall/mcp-utils';
 import { KiaCredentialError } from '../src/auth.js';
 import {
   KiaClient,
@@ -264,6 +265,69 @@ describe('sid minting', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('latches a credential rejection so LATER calls do not resend the rejected password', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      {
+        body: {
+          status: { statusCode: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' },
+          payload: { loginAttempt: 1 },
+        },
+      },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    // A second tool call (a model retry, a healthcheck, another read) must
+    // rethrow the same rejection locally: each resend is one more failed login
+    // towards Kia's permanent reCAPTCHA escalation.
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    await expect(client.getVehicleStatus(VIN_KEY)).rejects.toBeInstanceOf(KiaCredentialError);
+    expect(calls.filter((c) => c.url.endsWith('prof/authUser'))).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('clears the latched rejection when the session is forgotten', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      { body: { status: { statusCode: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' } } },
+      AUTH_OK,
+      { body: { status: OK, payload: { vehicleSummary: [] } } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    client.forgetSession();
+    await expect(client.listVehicles()).resolves.toEqual([]);
+    expect(calls).toHaveLength(3);
+  });
+
+  it('clears the latched rejection after a fresh MFA bootstrap completes', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      { body: { status: { statusCode: 1, errorCode: 1001, errorMessage: 'Invalid Email or Password' } } },
+      { headers: { sid: SID, rmtoken: 'fake-rmtoken-new' }, body: { status: OK } },
+      AUTH_OK,
+      { body: { status: OK, payload: { vehicleSummary: [] } } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toBeInstanceOf(KiaCredentialError);
+    await client.completeLogin({ otpKey: 'fake-otp-key', xid: 'fake-xid', otp: '000000' });
+    await expect(client.listVehicles()).resolves.toEqual([]);
+    expect(calls).toHaveLength(4);
+  });
+
+  it('does not latch a non-credential mint failure', async () => {
+    const { fetchImpl, calls } = stubFetch([
+      { body: { status: { statusCode: 1, errorCode: 9999, errorMessage: 'Temporary outage' } } },
+      AUTH_OK,
+      { body: { status: OK, payload: { vehicleSummary: [] } } },
+    ]);
+    const client = makeClient(fetchImpl);
+
+    await expect(client.listVehicles()).rejects.toThrow(/outage/);
+    await expect(client.listVehicles()).resolves.toEqual([]);
+    expect(calls).toHaveLength(3);
+  });
+
   it('re-mints and replays exactly once when a call reports an expired session', async () => {
     const { fetchImpl, calls } = stubFetch([
       AUTH_OK,
@@ -302,6 +366,23 @@ describe('sid minting', () => {
     const { fetchImpl } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
     await makeClient(fetchImpl, { sessionIO: io }).listVehicles();
     expect(io.saved).toHaveLength(0);
+  });
+
+  it('passes the ambient tool-call signal to fetch, so a cancelled call stops its request', async () => {
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
+    const client = makeClient(fetchImpl);
+    const controller = new AbortController();
+
+    await withCallSignal(controller.signal, () => client.listVehicles());
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call.init.signal).toBe(controller.signal);
+  });
+
+  it('sends no signal outside a tool call', async () => {
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
+    await makeClient(fetchImpl).listVehicles();
+    expect('signal' in calls[1].init).toBe(false);
   });
 
   it('uses the global fetch when none is injected', async () => {
@@ -818,7 +899,7 @@ describe('verifyCommand', () => {
     expect(result.attempts).toBe(2);
     expect(result.changedFields).toEqual(['doorLock']);
     expect(result.snapshot).toEqual({ doorLock: true, syncDate: 3 });
-    expect(sleep).toHaveBeenCalledWith(5_000);
+    expect(sleep).toHaveBeenCalledWith(5_000, undefined);
   });
 
   it('EXCLUDES syncDate from change detection (including it makes every command look successful)', async () => {
@@ -860,6 +941,107 @@ describe('verifyCommand', () => {
     expect(result.verified).toBe(true);
     expect(result.attempts).toBe(1);
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('stops polling as soon as the caller cancels, instead of hitting Kia for minutes', async () => {
+    const controller = new AbortController();
+    let clock = 0;
+    const read = vi.fn().mockResolvedValue({ doorLock: false });
+    const sleep = vi.fn().mockImplementation(async () => {
+      clock += 5_000;
+      if (clock >= 10_000) controller.abort(new Error('cancelled by client'));
+    });
+
+    const result = await client.verifyCommand(read, () => false, {
+      timeoutMs: 300_000,
+      intervalMs: 5_000,
+      sleep,
+      now: () => clock,
+      signal: controller.signal,
+    });
+
+    expect(result.verified).toBe(false);
+    expect(result.cancelled).toBe(true);
+    // Initial read + the one after the first sleep; the abort during the
+    // second sleep ends the loop without another read.
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not poll at all when the caller has already gone', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const read = vi.fn().mockResolvedValue({ doorLock: false });
+    const sleep = vi.fn();
+
+    const result = await client.verifyCommand(read, () => false, { sleep, signal: controller.signal });
+
+    expect(result.cancelled).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('honours the ambient tool-call signal by default, cutting the default sleep short', async () => {
+    const controller = new AbortController();
+    const read = vi.fn().mockResolvedValue({ doorLock: false });
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 20);
+
+    const result = await withCallSignal(controller.signal, () =>
+      client.verifyCommand(read, () => false, { timeoutMs: 60_000, intervalMs: 30_000 }),
+    );
+
+    expect(result.cancelled).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it('reports progress while polling, when the caller asked for it', async () => {
+    const notify = vi.fn();
+    const request = { _meta: { progressToken: 'tok-1' }, notify };
+    let clock = 0;
+    const snapshots = [{ doorLock: false }, { doorLock: false }, { doorLock: true }];
+    let index = 0;
+
+    await withCallSignal(
+      new AbortController().signal,
+      () =>
+        client.verifyCommand(async () => snapshots[index++], (s) => s.doorLock, {
+          timeoutMs: 30_000,
+          intervalMs: 5_000,
+          sleep: async () => {
+            clock += 5_000;
+          },
+          now: () => clock,
+        }),
+      request,
+    );
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify.mock.calls[0][0]).toMatchObject({
+      method: 'notifications/progress',
+      params: { progressToken: 'tok-1', progress: 5_000, total: 30_000 },
+    });
+  });
+
+  it('keeps verifying when a progress notification fails to send', async () => {
+    const request = { _meta: { progressToken: 'tok-1' }, notify: vi.fn().mockRejectedValue(new Error('closed')) };
+    const snapshots = [{ doorLock: false }, { doorLock: true }];
+    let index = 0;
+
+    const result = await withCallSignal(
+      new AbortController().signal,
+      () =>
+        client.verifyCommand(async () => snapshots[index++], (s) => s.doorLock, {
+          intervalMs: 1,
+          timeoutMs: 5_000,
+          sleep: async () => {},
+          now: () => 0,
+        }),
+      request,
+    );
+
+    expect(result.verified).toBe(true);
   });
 
   it('diffs against the first read when no baseline is supplied', async () => {

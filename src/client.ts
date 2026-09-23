@@ -22,8 +22,9 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { McpToolError, loadDotenvSafely, readEnvVar } from '@chrischall/mcp-utils';
+import { McpToolError, currentCallSignal, loadDotenvSafely, readEnvVar, reportProgress } from '@chrischall/mcp-utils';
 import {
+  KiaCredentialError,
   type KiaCredentials,
   type OtpNotifyType,
   type SendOtpResult,
@@ -282,8 +283,14 @@ export interface VerifyCommandOptions<T> {
   timeoutMs?: number;
   /** Delay between re-reads (default 5s). */
   intervalMs?: number;
-  /** Injectable for tests. */
-  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Stop polling when this aborts. Defaults to the running tool call's
+   * cancellation, so a caller that cancelled or timed out does not leave this
+   * loop hitting Kia for up to the whole wait budget.
+   */
+  signal?: AbortSignal;
+  /** Injectable for tests. Receives {@link signal} so it can wake early. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Injectable clock for tests. */
   now?: () => number;
 }
@@ -298,9 +305,24 @@ export interface VerifyCommandResult<T> {
   snapshot: T;
   /** Fields that changed vs. the baseline, `syncDate` excluded. */
   changedFields: string[];
+  /** Polling stopped early because the caller cancelled. */
+  cancelled: boolean;
 }
 
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Sleep that resolves early (never rejects) when `signal` aborts. Only ever
+ * called with a signal that has not yet aborted — the poll loop checks first.
+ */
+const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
 
 // ---------------------------------------------------------------------------
 // Client
@@ -352,6 +374,13 @@ export class KiaClient {
   private cachedDeviceId: string | undefined;
   private cachedRmToken: string | null | undefined;
   private cachedSids: SidManager | undefined;
+  /**
+   * A credential rejection from a `sid` mint, latched for the life of the
+   * session. See {@link sids}: without it every later tool call would resend
+   * the same rejected password, each one a failed login towards Kia's
+   * permanent reCAPTCHA escalation.
+   */
+  private credentialRejection: KiaCredentialError | undefined;
 
   // Session-scoped vinkey state — see `resolveSessionVinKey`. `vinByVehicleKey`
   // is NOT session-scoped on purpose: it is how a key from a dead session is
@@ -487,6 +516,7 @@ export class KiaClient {
     this.sessionIO.clear(this.accountId);
     this.cachedRmToken = undefined;
     this.cachedSids = undefined;
+    this.credentialRejection = undefined;
   }
 
   private adoptRmToken(rmtoken: string): void {
@@ -500,16 +530,32 @@ export class KiaClient {
     });
   }
 
-  /** Single-flight `sid` minting, built on first use. */
+  /**
+   * Single-flight `sid` minting, built on first use.
+   *
+   * Every mint re-sends the password (`prof/authUser` carries the credentials
+   * alongside the `rmtoken`), so a {@link KiaCredentialError} is LATCHED: later
+   * calls rethrow it without touching the network. "Never retried" has to hold
+   * across tool calls, not just within one — otherwise a model retrying, or a
+   * healthcheck, spends another failed login each time. The latch clears only
+   * when the session is re-established ({@link forgetSession} or a completed
+   * {@link completeLogin}); the password itself cannot change without a restart.
+   */
   private get sids(): SidManager {
     return (this.cachedSids ??= new SidManager({
       ttlMs: this.opts.sidTtlMs,
       mint: async () => {
+        if (this.credentialRejection) throw this.credentialRejection;
         const credentials = this.requireCredentials();
         const rmtoken = this.requireRmToken();
-        const result = await refreshSession(rmtoken, credentials, this.deviceId, { fetchImpl: this.opts.fetchImpl });
-        this.adoptRmToken(result.rmtoken);
-        return result.sid;
+        try {
+          const result = await refreshSession(rmtoken, credentials, this.deviceId, { fetchImpl: this.opts.fetchImpl });
+          this.adoptRmToken(result.rmtoken);
+          return result.sid;
+        } catch (err) {
+          if (err instanceof KiaCredentialError) this.credentialRejection = err;
+          throw err;
+        }
       },
     }));
   }
@@ -541,8 +587,10 @@ export class KiaClient {
     this.requireCredentials();
     const { rmtoken } = await verifyOtp(args, this.deviceId, { fetchImpl: this.opts.fetchImpl });
     this.adoptRmToken(rmtoken);
-    // Drop any SidManager built against the previous token.
+    // Drop any SidManager built against the previous token, and any credential
+    // rejection latched under it: Kia just accepted this account again.
     this.cachedSids = undefined;
+    this.credentialRejection = undefined;
     return { accountId: this.accountId, deviceId: this.deviceId, persisted: true };
   }
 
@@ -835,6 +883,7 @@ export class KiaClient {
     const intervalMs = opts.intervalMs ?? 5_000;
     const sleep = opts.sleep ?? defaultSleep;
     const now = opts.now ?? Date.now;
+    const signal = opts.signal ?? currentCallSignal();
     const started = now();
 
     let snapshot = await readFn();
@@ -842,8 +891,15 @@ export class KiaClient {
     const baseline = opts.baseline ?? snapshot;
     let verified = predicate(snapshot);
 
-    while (!verified && now() - started + intervalMs <= timeoutMs) {
-      await sleep(intervalMs);
+    while (!verified && !signal?.aborted && now() - started + intervalMs <= timeoutMs) {
+      await sleep(intervalMs, signal);
+      if (signal?.aborted) break;
+      // Keep a progress-aware client informed while the car catches up. A
+      // no-op unless the caller sent a progressToken; a failed notification
+      // must never cost the verification result.
+      await reportProgress(now() - started, timeoutMs, `Waiting for the vehicle to confirm (read ${attempts + 1})`).catch(
+        () => undefined,
+      );
       snapshot = await readFn();
       attempts += 1;
       verified = predicate(snapshot);
@@ -855,6 +911,7 @@ export class KiaClient {
       elapsedMs: now() - started,
       snapshot,
       changedFields: diffIgnoringSyncDate(baseline, snapshot),
+      cancelled: signal?.aborted === true,
     };
   }
 }

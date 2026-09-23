@@ -78,7 +78,7 @@ A server with no one to read an OTP cannot run these steps at all. Bootstrap it 
 ## Reading a command result
 
 - **Without `confirm: true` nothing happens.** The tool makes no network call and returns `dryRun: true` with the exact request it would send. Show the user that preview; never describe a dry run as if the car acted.
-- **`commandAccepted` ≠ `stateConfirmed`.** Kia returning success only means the request was accepted. Only `stateConfirmed: true` means the car actually reads locked / unlocked / climate-on. Changes take 30–60 seconds; `waitSeconds` controls how long the tool keeps re-reading.
+- **`commandAccepted` ≠ `stateConfirmed`.** Kia returning success only means the request was accepted. Only `stateConfirmed: true` means the car actually reads locked / unlocked / climate-on. Changes take 30–60 seconds; `waitSeconds` controls how long the tool keeps re-reading. It defaults to 30 so the call finishes inside a client's own request timeout; an unconfirmed result (or a client-side timeout) still means the command WAS sent — re-read the vehicle status, never re-send the command to "retry".
 - **`stateConfirmed: false` is not "it failed"** — it means the tool stopped waiting. Say exactly that, and offer to re-read `kia_vehicle_status`.
 - **On an EV, `engine` stays false with the climate running.** `ign3` is the ignition proxy. Never report the car as off because `engine` is false.
 - **`syncDate` advances on every read** and proves nothing changed.
