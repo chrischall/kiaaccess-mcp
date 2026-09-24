@@ -17,11 +17,11 @@
  *     itself), and `evStatus.batteryCharge` — inside the `cmm/gvi` read that
  *     `kia_vehicle_status` performs — for start/stop charge.
  */
-import type { McpServer, CallToolResult } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import {
   McpToolError,
+  confirmTokenParam,
   minifiedResult,
-  schemaConfirm,
   toolAnnotations,
 } from '@chrischall/mcp-utils';
 import { z } from 'zod';
@@ -33,7 +33,7 @@ import {
   ENDPOINTS,
   type KiaCommandName,
 } from '../protocol.js';
-import { getKiaWriteMode } from './commands.js';
+import { CONFIRM_DESCRIPTION, confirmVehicleCommand, getKiaWriteMode } from './commands.js';
 
 // ---------------------------------------------------------------------------
 // Schema atoms
@@ -97,37 +97,47 @@ const ACCEPTED_HINT =
   'kia_vehicle_status (evStatus.batteryCharge flips within ~30-60s) or, for limits, kia_charge_targets.';
 
 /**
- * Confirm-gate for a mutating tool. Without `confirm: true` NO network call is
- * made and the caller gets a preview of exactly what would be sent; with it,
- * `null` is returned so the handler proceeds.
+ * Confirmation gate for a mutating tool. Makes NO network call: the user sees
+ * exactly what would be sent, and the token binds that request. Returns the
+ * result to hand back, or `undefined` once confirmed.
  */
-function previewUnlessConfirmed(
-  confirm: boolean | undefined,
+function confirmChargeCommand(
+  ctx: ServerContext,
   command: KiaCommandName,
   args: {
+    tool: string;
+    /** `<service>.<verb>`, e.g. `charge.start`. */
+    confirmAction: string;
     vinKey: string;
     action: string;
     body?: unknown;
     verification: string;
+    confirmToken: string | undefined;
   },
-): CallToolResult | null {
-  if (confirm === true) return null;
+): ReturnType<typeof confirmVehicleCommand> {
   // Widened to `CommandSpec` so the optional `note` is readable across the union.
   const spec: CommandSpec = COMMAND_SPECS[command];
-  return minifiedResult({
-    dryRun: true,
-    action: args.action,
+  return confirmVehicleCommand(ctx, {
+    tool: args.tool,
+    action: args.confirmAction,
     command,
-    method: spec.method,
-    endpoint: spec.path,
-    url: `${BASE_URL}${spec.path}`,
     vinKey: args.vinKey,
-    // Dropped from the JSON when the command has no body (a GET).
-    willSend: args.body,
-    endpointVerified: spec.verified,
-    note: spec.note,
-    verification: args.verification,
-    hint: 'No request was made. Re-run with confirm: true to execute.',
+    body: args.body,
+    confirmToken: args.confirmToken,
+    preview: {
+      action: args.action,
+      command,
+      method: spec.method,
+      endpoint: spec.path,
+      url: `${BASE_URL}${spec.path}`,
+      vinKey: args.vinKey,
+      // Dropped from the JSON when the command has no body (a GET).
+      willSend: args.body,
+      endpointVerified: spec.verified,
+      note: spec.note,
+      verification: args.verification,
+      hint: 'Nothing has been sent yet: no request was made.',
+    },
   });
 }
 
@@ -201,7 +211,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         'Verified against a plugged-in vehicle: evStatus.batteryCharge goes true within ~30-60s. Requires the car ' +
         'to be plugged in — on an unplugged car Kia still accepts the request and nothing happens. Confirm with ' +
         'kia_vehicle_status rather than trusting the success status. ' +
-        'Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.',
+        CONFIRM_DESCRIPTION,
       annotations: toolAnnotations({
         title: 'Start Kia EV charging',
         readOnly: false,
@@ -218,12 +228,15 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
           .max(100)
           .describe(`Charge up to this percentage, ${MIN_TARGET_SOC}–100. Defaults to 100.`)
           .optional(),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ vinKey, chargeRatio, confirm }) => {
+    async ({ vinKey, chargeRatio, confirmToken }, ctx) => {
       const ratio = chargeRatio ?? 100;
-      const gate = previewUnlessConfirmed(confirm, 'charge', {
+      const gate = await confirmChargeCommand(ctx, 'charge', {
+        tool: 'kia_start_charge',
+        confirmAction: 'charge.start',
+        confirmToken,
         vinKey,
         action: `Start charging vehicle ${vinKey} to ${ratio}%`,
         body: { chargeRatio: ratio },
@@ -248,7 +261,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         `Ask the vehicle to stop charging (\`${COMMAND_SPECS.cancelCharge.path}\`). ` +
         'Verified against a charging vehicle: evStatus.batteryCharge goes false within ~30-60s. Confirm with ' +
         'kia_vehicle_status rather than trusting the success status. ' +
-        'Without confirm:true it makes NO network call and returns a dry-run preview of exactly what would be sent.',
+        CONFIRM_DESCRIPTION,
       annotations: toolAnnotations({
         title: 'Stop Kia EV charging',
         readOnly: false,
@@ -256,10 +269,13 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         openWorld: true,
         destructive: false,
       }),
-      inputSchema: z.object({ vinKey: schemaVinKey, confirm: schemaConfirm }),
+      inputSchema: z.object({ vinKey: schemaVinKey, confirmToken: confirmTokenParam }),
     },
-    async ({ vinKey, confirm }) => {
-      const gate = previewUnlessConfirmed(confirm, 'cancelCharge', {
+    async ({ vinKey, confirmToken }, ctx) => {
+      const gate = await confirmChargeCommand(ctx, 'cancelCharge', {
+        tool: 'kia_stop_charge',
+        confirmAction: 'charge.stop',
+        confirmToken,
         vinKey,
         action: `Stop charging vehicle ${vinKey}`,
         verification: CONFIRM_VIA_STATUS,
@@ -283,8 +299,8 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         'Verified against a real vehicle. The write is checked: afterwards the targets are re-read from evc/gts ' +
         'and compared, and the result reports whether the change actually landed. Send BOTH plug types — the list ' +
         'replaces the stored one, so omitting an entry drops that target. ' +
-        'Without confirm:true it makes NO network call (not even the baseline read) and returns a dry-run preview ' +
-        'of exactly what would be sent.',
+        CONFIRM_DESCRIPTION +
+        ' The preview step makes no call at all, not even the baseline read.',
       annotations: toolAnnotations({
         title: 'Set Kia EV charge limits',
         readOnly: false,
@@ -305,10 +321,10 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
           .boolean()
           .describe('Re-read evc/gts afterwards to check the change landed. Defaults to true.')
           .optional(),
-        confirm: schemaConfirm,
+        confirmToken: confirmTokenParam,
       }),
     },
-    async ({ vinKey, targets, verify, confirm }) => {
+    async ({ vinKey, targets, verify, confirmToken }, ctx) => {
       const duplicate = targets.find(
         (t, i) => targets.findIndex((o) => o.plugType === t.plugType) !== i,
       );
@@ -321,7 +337,10 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         );
       }
 
-      const gate = previewUnlessConfirmed(confirm, 'setChargeTargets', {
+      const gate = await confirmChargeCommand(ctx, 'setChargeTargets', {
+        tool: 'kia_set_charge_limits',
+        confirmAction: 'charge.set_limits',
+        confirmToken,
         vinKey,
         action: `Set charge targets on vehicle ${vinKey} to ${targets.map((t) => `plug ${t.plugType} → ${t.targetSOClevel}%`).join(', ')}`,
         body: { targetSOClist: targets },

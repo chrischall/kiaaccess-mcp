@@ -195,7 +195,7 @@ export class SidManager {
    *
    * The value is deliberately not mirrored anywhere on this class: a `sid` is a
    * credential, so nothing outside an authenticated request should be able to
-   * read one back out (no diagnostics, no dry-run preview).
+   * read one back out (no diagnostics, no confirmation preview).
    */
   getSid(): Promise<string> {
     return this.tokens.getAccessToken();

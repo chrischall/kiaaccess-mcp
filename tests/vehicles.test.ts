@@ -150,16 +150,16 @@ describe('registerVehiclesTools', () => {
     }
   });
 
-  it('registers no mutating tool: nothing here takes a `confirm` gate', async () => {
-    // This registrar owns reads only, so the fleet's confirm/dry-run rule has
+  it('registers no mutating tool: nothing here takes a confirmation gate', async () => {
+    // This registrar owns reads only, so the fleet's confirmation rule has
     // nothing to gate. If a mutation ever lands here, this test fails and the
-    // author must add `schemaConfirm` + a no-network preview.
+    // author must add `confirmTokenParam` + the confirmation gate.
     const { tools } = await harness.client.listTools();
     for (const tool of tools) {
       const properties =
         (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
-      expect(Object.keys(properties), `${tool.name} must not need confirm`).not.toContain(
-        'confirm',
+      expect(Object.keys(properties), `${tool.name} must not need confirmation`).not.toContain(
+        'confirmToken',
       );
     }
   });

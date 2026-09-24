@@ -158,7 +158,7 @@ describe('KIA_WRITE_MODE gating', () => {
   });
 });
 
-describe('confirm gating', () => {
+describe('confirmation gating', () => {
   it('gates exactly the tools that act on the car or emit a credential', async () => {
     process.env.KIA_WRITE_MODE = 'all';
     const harness = await createTestHarness(async (server) => {
@@ -167,13 +167,17 @@ describe('confirm gating', () => {
     try {
       const { tools } = await harness.client.listTools();
       const gated = tools
-        .filter((tool) => Object.keys(tool.inputSchema.properties ?? {}).includes('confirm'))
+        .filter((tool) => Object.keys(tool.inputSchema.properties ?? {}).includes('confirmToken'))
         .map((tool) => tool.name)
         .sort();
       // Every tool that moves the vehicle is here. The two that are NOT are
       // deliberate: kia_send_otp and kia_verify_otp are inner steps of a login
       // the already-confirmed kia_start_login began, and cannot run without the
       // otpKey/xid it returned.
+      // The old boolean `confirm` is gone everywhere — no alias, no fallback.
+      for (const tool of tools) {
+        expect(Object.keys(tool.inputSchema.properties ?? {}), tool.name).not.toContain('confirm');
+      }
       expect(gated).toEqual([
         'kia_export_refresh_token',
         'kia_forget_session',

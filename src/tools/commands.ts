@@ -5,10 +5,12 @@
  *
  * Three rules shape every tool in this file:
  *
- *  1. **Confirm-gated.** Without `confirm: true` a tool makes NO network call at
- *     all — not even the baseline read — and returns a dry-run preview of the
- *     exact request that would be sent. These commands move a two-tonne object
- *     in the physical world; a hallucinated call must not fire silently.
+ *  1. **Confirmation-gated.** Every tool asks the user first: a confirmation
+ *     prompt where the client supports one; otherwise the first call makes NO
+ *     network call at all — not even the baseline read — and returns a preview
+ *     of the exact request plus a `confirmToken`, and only a repeat call with
+ *     that token sends it (`MCP_CONFIRM_MODE`). These commands move a two-tonne
+ *     object in the physical world; a hallucinated call must not fire silently.
  *  2. **Accepted ≠ confirmed.** Kia answering `statusCode: 0` only means the
  *     request was accepted. The ONLY proof a command took effect is re-reading
  *     `cmm/gvi` and diffing the proof field, so every result reports
@@ -19,14 +21,16 @@
  *     at all (see {@link getKiaWriteMode}). An unregistered tool cannot be
  *     invoked by any host permission setting or injected instruction.
  */
-import type { McpServer, CallToolResult } from '@modelcontextprotocol/server';
+import type { McpServer, CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import {
   McpToolError,
   SafePathSegment,
+  confirmTokenParam,
+  confirmationFromEnv,
   currentCallSignal,
   minifiedResult,
   readEnvVar,
-  schemaConfirm,
+  requireConfirmationWithFallback,
   toolAnnotations,
 } from '@chrischall/mcp-utils';
 import { z } from 'zod';
@@ -111,7 +115,7 @@ const waitSecondsArg = z
 const baseArgs = z.object({
   vinKey: vinKeyArg,
   waitSeconds: waitSecondsArg,
-  confirm: schemaConfirm,
+  confirmToken: confirmTokenParam,
 });
 
 /** Inclusive °F bounds Kia's own app offers for a remote climate start. */
@@ -156,6 +160,15 @@ const temperatureArg = z
   )
   .optional();
 
+/**
+ * The confirmation sentence every write tool's description carries. Exported
+ * so the charging and session tools say exactly the same thing.
+ */
+export const CONFIRM_DESCRIPTION =
+  'Asks the user to confirm first: a confirmation prompt where the client supports one; otherwise the first ' +
+  'call makes NO network call and returns a preview plus a confirmToken, and only a repeat call with that ' +
+  'token proceeds (see MCP_CONFIRM_MODE).';
+
 const NO_GTS_NOTE =
   'Proof comes from re-reading cmm/gvi and diffing the field (syncDate excluded — it advances on every read). ' +
   'cmm/gts is never polled: it reports global flags, never per-command completion.';
@@ -193,7 +206,7 @@ type ProofExpectation = Record<string, boolean>;
 /** One command tool's wire + verification plan. */
 interface CommandPlan {
   command: KiaCommandName;
-  /** Human-readable summary of the action, echoed in the dry-run preview. */
+  /** Human-readable summary of the action, echoed in the confirmation preview. */
   action: string;
   /** The GATING check: every entry must match on the re-read. */
   expect: ProofExpectation;
@@ -202,20 +215,19 @@ interface CommandPlan {
 }
 
 // ---------------------------------------------------------------------------
-// Dry run + execution
+// Confirmation + execution
 // ---------------------------------------------------------------------------
 
 /**
- * The no-network branch. Renders exactly what would be sent, straight from
+ * What the user reviews before a command is sent. Rendered straight from
  * `COMMAND_SPECS` and the same body builder the real call uses, so the preview
  * can't drift from the request.
  */
-function previewCommand(plan: CommandPlan, vinKey: string): CallToolResult {
+function commandPreview(plan: CommandPlan, vinKey: string): Record<string, unknown> {
   // Widened to `CommandSpec`: the `as const` literal type drops `note` from the
   // entries that don't carry one.
   const spec: CommandSpec = COMMAND_SPECS[plan.command];
-  return minifiedResult({
-    dryRun: true,
+  return {
     action: plan.action,
     command: plan.command,
     method: spec.method,
@@ -232,8 +244,47 @@ function previewCommand(plan: CommandPlan, vinKey: string): CallToolResult {
       willAlsoReport: spec.proofFields,
       method: NO_GTS_NOTE,
     },
-    note: 'NO network call was made and the vehicle was not touched. Re-run with confirm: true to execute.',
-  });
+    note: 'Nothing has been sent yet: no network call was made and the vehicle has not been touched.',
+  };
+}
+
+/**
+ * Ask the user to confirm a vehicle command. Makes NO network call — the
+ * subject is rebuilt from the arguments alone, and the token binds exactly the
+ * request that will be sent (command, vehicle, body). Returns the result to
+ * hand back, or `undefined` once confirmed.
+ */
+export async function confirmVehicleCommand(
+  ctx: ServerContext,
+  options: {
+    tool: string;
+    /** `<service>.<verb>`, e.g. `vehicle.lock`. */
+    action: string;
+    command: KiaCommandName;
+    vinKey: string;
+    /** The request body, when the endpoint takes one. */
+    body?: unknown;
+    /** Everything the user reviews. */
+    preview: Record<string, unknown>;
+    confirmToken: string | undefined;
+  },
+): ReturnType<typeof requireConfirmationWithFallback> {
+  const { command, vinKey, body, preview } = options;
+  return requireConfirmationWithFallback(
+    ctx,
+    confirmationFromEnv({
+      action: options.action,
+      message: 'Review and confirm this vehicle command:',
+      details: preview,
+      tool: options.tool,
+      confirmToken: options.confirmToken,
+      subject: () => ({
+        target: vinKey,
+        payload: { command, vinKey, body },
+        preview,
+      }),
+    }),
+  );
 }
 
 /**
@@ -354,7 +405,7 @@ function cancelledBeforeSend(plan: CommandPlan, vinKey: string): CallToolResult 
     expected: plan.expect,
     note:
       'The call was cancelled before the command was sent — the command was NOT sent and the vehicle was not ' +
-      'touched. Run it again with confirm: true if it is still wanted.',
+      'touched. Run it again (it will ask for confirmation afresh) if it is still wanted.',
   });
 }
 
@@ -397,7 +448,7 @@ function describeExpectation(expect: ProofExpectation): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Register the confirm-gated door + climate commands, subject to
+ * Register the confirmation-gated door + climate commands, subject to
  * `KIA_WRITE_MODE`. Door locks require `all`; climate requires `comfort` or
  * `all`; `none` (and any unrecognised value) registers nothing.
  */
@@ -409,6 +460,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
     registerDoorTool(server, client, {
       name: 'kia_lock_doors',
       title: 'Lock doors',
+      confirmAction: 'vehicle.lock',
       plan: (vinKey) => ({
         command: 'lock',
         action: `Lock the doors of vehicle ${vinKey}`,
@@ -417,9 +469,9 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       invoke: (vinKey) => client.lockDoors(vinKey),
       destructive: false,
       description:
-        'Lock the vehicle doors (Kia `rems/door/lock`, live-verified). Without confirm:true this makes NO network ' +
-        'call and returns a dry-run preview of the exact request; with confirm:true it sends the command and then ' +
-        're-reads cmm/gvi until `doorLock` reads true. The result reports `commandAccepted` (Kia took the request) ' +
+        'Lock the vehicle doors (Kia `rems/door/lock`, live-verified). ' +
+        CONFIRM_DESCRIPTION +
+        ' Once confirmed it sends the command and then re-reads cmm/gvi until `doorLock` reads true. The result reports `commandAccepted` (Kia took the request) ' +
         'and `stateConfirmed` (the car actually reads locked) separately — only `stateConfirmed: true` means the ' +
         'doors are locked. State changes were observed to take 30–60s.',
     });
@@ -427,6 +479,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
     registerDoorTool(server, client, {
       name: 'kia_unlock_doors',
       title: 'Unlock doors',
+      confirmAction: 'vehicle.unlock',
       plan: (vinKey) => ({
         command: 'unlock',
         action: `Unlock the doors of vehicle ${vinKey}`,
@@ -439,8 +492,9 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       description:
         'UNLOCK the vehicle doors (Kia `rems/door/unlock`, live-verified). This leaves the car physically ' +
         'unsecured until it is locked again — only run it when the user has explicitly asked to unlock this ' +
-        'vehicle. Without confirm:true this makes NO network call and returns a dry-run preview; with ' +
-        'confirm:true it sends the command and re-reads cmm/gvi until `doorLock` reads false. `commandAccepted` ' +
+        'vehicle. ' +
+        CONFIRM_DESCRIPTION +
+        ' Once confirmed it sends the command and re-reads cmm/gvi until `doorLock` reads false. `commandAccepted` ' +
         '(Kia took the request) and `stateConfirmed` (the car actually reads unlocked) are reported separately. ' +
         'State changes were observed to take 30–60s.',
     });
@@ -451,9 +505,9 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
     'kia_start_climate',
     {
       description:
-        'Start remote climate control / preconditioning (Kia `rems/start`, live-verified). Without confirm:true ' +
-        'this makes NO network call and returns a dry-run preview of the exact body; with confirm:true it sends ' +
-        'the command and re-reads cmm/gvi until the NESTED `climate.airCtrl` reads true (there is no flat ' +
+        'Start remote climate control / preconditioning (Kia `rems/start`, live-verified). ' +
+        CONFIRM_DESCRIPTION +
+        ' Once confirmed it sends the command and re-reads cmm/gvi until the NESTED `climate.airCtrl` reads true (there is no flat ' +
         '`airCtrlOn` field). On an EV `engine` stays false while climate runs — `ign3` is the ignition proxy and ' +
         'is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually ' +
         'reads running) are separate; state changes were observed to take 30–60s. ' +
@@ -484,7 +538,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         defrost: z.boolean().default(false).describe('Run front defrost (default false).'),
       }),
     },
-    async ({ vinKey, waitSeconds, confirm, temperature, durationMinutes, defrost }) => {
+    async ({ vinKey, waitSeconds, confirmToken, temperature, durationMinutes, defrost }, ctx) => {
       const options: StartClimateOptions = {
         // `airTempF` is typed `number`, but the builder stringifies it and Kia's
         // `airTemp.value` is a STRING whose domain includes the "LOW"/"HIGH"
@@ -501,7 +555,16 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         expect: { 'climate.airCtrl': true },
         body: buildStartClimateBody(options),
       };
-      if (confirm !== true) return previewCommand(plan, vinKey);
+      const gate = await confirmVehicleCommand(ctx, {
+        tool: 'kia_start_climate',
+        action: 'climate.start',
+        command: plan.command,
+        vinKey,
+        body: plan.body,
+        preview: commandPreview(plan, vinKey),
+        confirmToken,
+      });
+      if (gate) return gate;
       return runCommand(client, plan, { vinKey, waitSeconds }, () =>
         client.startClimate(vinKey, options),
       );
@@ -511,8 +574,9 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
     'kia_stop_climate',
     {
       description:
-        'Stop remote climate control (Kia `rems/stop`, live-verified). Without confirm:true this makes NO network ' +
-        'call and returns a dry-run preview; with confirm:true it sends the command and re-reads cmm/gvi until the ' +
+        'Stop remote climate control (Kia `rems/stop`, live-verified). ' +
+        CONFIRM_DESCRIPTION +
+        ' Once confirmed it sends the command and re-reads cmm/gvi until the ' +
         'NESTED `climate.airCtrl` reads false (there is no flat `airCtrlOn` field); `ign3` — the EV ignition proxy ' +
         '— is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually ' +
         'reads stopped) are separate. State changes were observed to take 30–60s.',
@@ -527,13 +591,22 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       },
       inputSchema: baseArgs,
     },
-    async ({ vinKey, waitSeconds, confirm }) => {
+    async ({ vinKey, waitSeconds, confirmToken }, ctx) => {
       const plan: CommandPlan = {
         command: 'stop',
         action: `Stop climate on vehicle ${vinKey}`,
         expect: { 'climate.airCtrl': false },
       };
-      if (confirm !== true) return previewCommand(plan, vinKey);
+      const gate = await confirmVehicleCommand(ctx, {
+        tool: 'kia_stop_climate',
+        action: 'climate.stop',
+        command: plan.command,
+        vinKey,
+        body: plan.body,
+        preview: commandPreview(plan, vinKey),
+        confirmToken,
+      });
+      if (gate) return gate;
       return runCommand(client, plan, { vinKey, waitSeconds }, () => client.stopClimate(vinKey));
     },
   );
@@ -546,6 +619,8 @@ function registerDoorTool(
   tool: {
     name: string;
     title: string;
+    /** `<service>.<verb>` for the confirmation. */
+    confirmAction: string;
     description: string;
     destructive: boolean;
     plan: (vinKey: string) => CommandPlan;
@@ -567,9 +642,18 @@ function registerDoorTool(
       },
       inputSchema: baseArgs,
     },
-    async ({ vinKey, waitSeconds, confirm }) => {
+    async ({ vinKey, waitSeconds, confirmToken }, ctx) => {
       const plan = tool.plan(vinKey);
-      if (confirm !== true) return previewCommand(plan, vinKey);
+      const gate = await confirmVehicleCommand(ctx, {
+        tool: tool.name,
+        action: tool.confirmAction,
+        command: plan.command,
+        vinKey,
+        body: plan.body,
+        preview: commandPreview(plan, vinKey),
+        confirmToken,
+      });
+      if (gate) return gate;
       return runCommand(client, plan, { vinKey, waitSeconds }, () => tool.invoke(vinKey));
     },
   );

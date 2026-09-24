@@ -1,7 +1,7 @@
 /**
  * Account + session tools: the one-time MFA bootstrap, a non-secret status
  * read, the refresh-token export a hosted deployment needs, and
- * the confirm-gated way to throw the stored session away and start over.
+ * the confirmation-gated way to throw the stored session away and start over.
  *
  * Kia's auth is a three-step challenge that is bootstrapped ONCE per device:
  *
@@ -16,7 +16,7 @@
  *
  * Three deliberate decisions, each of which a reviewer should weigh:
  *
- *  1. **`kia_start_login` is confirm-gated; `kia_send_otp` / `kia_verify_otp`
+ *  1. **`kia_start_login` is confirmation-gated; `kia_send_otp` / `kia_verify_otp`
  *     are not.** The gate is not ceremony: every rejected login increments
  *     Kia's `loginAttempt` and eventually sets `enforceRecaptcha`, which breaks
  *     server-side auth for this account PERMANENTLY (docs/KIA-API.md). That is
@@ -26,7 +26,7 @@
  *     account owner can read — gating them would add round-trips without adding
  *     a decision.
  *  2. **No tool returns a `sid` or an `rmtoken`** — except
- *     {@link registerSessionTools}'s explicit, confirm-gated export, which
+ *     {@link registerSessionTools}'s explicit, confirmation-gated export, which
  *     exists solely so a hosted deployment can persist the token
  *     into the user's encrypted OAuth props. `KiaClient.completeLogin()`
  *     deliberately returns no secret, so the normal bootstrap can never echo
@@ -38,15 +38,17 @@
 
 import {
   McpToolError,
+  confirmTokenParam,
+  confirmationFromEnv,
   minifiedResult,
-  schemaConfirm,
+  requireConfirmationWithFallback,
   toolAnnotations,
 } from '@chrischall/mcp-utils';
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { McpServer, ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { KiaClient } from '../client.js';
 import { BASE_URL, ENDPOINTS } from '../protocol.js';
-import { type KiaWriteMode, getKiaWriteMode } from './commands.js';
+import { CONFIRM_DESCRIPTION, type KiaWriteMode, getKiaWriteMode } from './commands.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so the real
@@ -107,6 +109,41 @@ const schemaOtpKey = schemaHeaderToken.describe('The `otpKey` returned by kia_st
 const schemaXid = schemaHeaderToken.describe(
   'The `xid` returned by kia_start_login. Sent with every OTP call.',
 );
+
+// ---------------------------------------------------------------------------
+// Confirmation
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask the user to confirm a session action. `preview` is rebuilt from a fresh
+ * local config read on every call and bound, in full, into the token — so a
+ * session that appeared or vanished between the two calls is refused as
+ * DRAFT_CHANGED rather than acted on. Makes no network call.
+ */
+function confirmSessionAction(
+  ctx: ServerContext,
+  options: {
+    tool: string;
+    /** `<service>.<verb>`, e.g. `session.forget`. */
+    action: string;
+    message: string;
+    preview: Record<string, unknown>;
+    confirmToken: string | undefined;
+  },
+): ReturnType<typeof requireConfirmationWithFallback> {
+  const { preview } = options;
+  return requireConfirmationWithFallback(
+    ctx,
+    confirmationFromEnv({
+      action: options.action,
+      message: options.message,
+      details: preview,
+      tool: options.tool,
+      confirmToken: options.confirmToken,
+      subject: () => ({ target: '', payload: preview, preview }),
+    }),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Registrar
@@ -176,7 +213,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'Step 1 of the ONE-TIME Kia MFA bootstrap (prof/authUser): send the configured credentials and get back the ' +
         '`otpKey` and `xid` the next two steps need. Only needed when kia_session_status reports hasSession:false — ' +
         'once the bootstrap is done the stored remember-me token refreshes sessions silently forever. ' +
-        'Without confirm:true it makes NO network call and returns a dry-run preview. The gate is real: Kia counts ' +
+        `${CONFIRM_DESCRIPTION} The gate is real: Kia counts ` +
         'failed logins and eventually enforces reCAPTCHA, which breaks server-side login for this account ' +
         'PERMANENTLY — so a rejection is never retried, and a wrong password must be fixed in the environment ' +
         'rather than guessed at.',
@@ -187,13 +224,16 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         openWorld: true,
         destructive: true,
       }),
-      inputSchema: z.object({ confirm: schemaConfirm }),
+      inputSchema: z.object({ confirmToken: confirmTokenParam }),
     },
-    async ({ confirm }) => {
+    async ({ confirmToken }, ctx) => {
       const account = maskAccountId(client.describeConfig().accountId);
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+      const gate = await confirmSessionAction(ctx, {
+        tool: 'kia_start_login',
+        action: 'session.start_login',
+        message: 'Review and confirm this Kia login attempt:',
+        confirmToken,
+        preview: {
           action: `Start the Kia MFA bootstrap for ${account ?? 'the configured account'}`,
           method: 'POST',
           endpoint: ENDPOINTS.authUser,
@@ -214,9 +254,10 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
             'This spends one login attempt. Kia increments `loginAttempt` on every rejection and eventually sets ' +
             'enforceRecaptcha, after which server-side login is permanently impossible for this account. Verify ' +
             'KIA_USERNAME / KIA_PASSWORD in the Kia Access app before confirming.',
-          hint: 'No request was made. Re-run with confirm: true to execute.',
-        });
-      }
+          hint: 'Nothing has been sent yet: no request was made.',
+        },
+      });
+      if (gate) return gate;
 
       const login = await client.beginLogin();
       return minifiedResult({
@@ -245,7 +286,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
       description:
         'Step 2 of the Kia MFA bootstrap (cmm/sendOTP): deliver a one-time passcode to the account by SMS or ' +
         'email. Takes the `otpKey` and `xid` from kia_start_login — it cannot run without them, which is why it ' +
-        'has no separate confirm gate. Ask the user which channel they want (kia_start_login reports the masked ' +
+        'has no separate confirmation gate. Ask the user which channel they want (kia_start_login reports the masked ' +
         'destinations Kia has on file). The passcode expires in about two minutes; `expiresAt` reports when.',
       annotations: toolAnnotations({
         title: 'Send Kia login passcode',
@@ -333,8 +374,9 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'entirely and, with the account password, grants full control of the vehicle — including unlocking it. ' +
         'It exists for one purpose: moving a locally-bootstrapped session into a hosted deployment, which stores ' +
         'it in the user\'s encrypted credentials. Do NOT call it to "check the session" (use kia_session_status), ' +
-        'and never display or log the value except where the user explicitly asked for it. Without confirm:true ' +
-        'the token is not even read.',
+        'and never display or log the value except where the user explicitly asked for it. ' +
+        CONFIRM_DESCRIPTION +
+        ' Until it is confirmed the token is not even read.',
       // Deliberately NOT readOnlyHint: this makes no remote change, but hosts
       // auto-approve read-only tools, and a tool that emits a credential must
       // stay an explicit, visible action.
@@ -345,23 +387,27 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         openWorld: false,
         destructive: true,
       }),
-      inputSchema: z.object({ confirm: schemaConfirm }),
+      inputSchema: z.object({ confirmToken: confirmTokenParam }),
     },
-    async ({ confirm }) => {
+    async ({ confirmToken }, ctx) => {
       const config = client.describeConfig();
       const account = maskAccountId(config.accountId);
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+      const gate = await confirmSessionAction(ctx, {
+        tool: 'kia_export_refresh_token',
+        action: 'session.export_token',
+        message: 'Review and confirm exporting this credential:',
+        confirmToken,
+        preview: {
           action: `Return the Kia remember-me token for ${account ?? 'the configured account'}`,
           account,
           hasSession: config.hasSession,
           warning:
-            'The value was NOT read. It is a long-lived credential that bypasses MFA — re-run with confirm: true ' +
-            'only if the user asked to move this session somewhere else (e.g. a hosted deployment).',
-          hint: 'No token was returned. Re-run with confirm: true to export it.',
-        });
-      }
+            'The value has NOT been read. It is a long-lived credential that bypasses MFA — confirm only if the ' +
+            'user asked to move this session somewhere else (e.g. a hosted deployment).',
+          hint: 'No token has been returned yet.',
+        },
+      });
+      if (gate) return gate;
 
       const rmtoken = client.exportRmToken();
       if (rmtoken === null) {
@@ -397,7 +443,8 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'MFA bootstrap again. This is the recovery path when the stored token no longer works — Kia revoked it, ' +
         'the password changed, or the account moved to another device — and the only alternative is deleting the ' +
         'session file by hand. It makes NO network call: Kia is not told anything, only this machine forgets. ' +
-        'Without confirm:true nothing is deleted and you get a preview instead.',
+        CONFIRM_DESCRIPTION +
+        ' Nothing is deleted until it is confirmed.',
       annotations: toolAnnotations({
         title: 'Forget stored Kia session',
         readOnly: false,
@@ -405,14 +452,17 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         openWorld: false,
         destructive: false,
       }),
-      inputSchema: z.object({ confirm: schemaConfirm }),
+      inputSchema: z.object({ confirmToken: confirmTokenParam }),
     },
-    async ({ confirm }) => {
+    async ({ confirmToken }, ctx) => {
       const config = client.describeConfig();
       const account = maskAccountId(config.accountId);
-      if (confirm !== true) {
-        return minifiedResult({
-          dryRun: true,
+      const gate = await confirmSessionAction(ctx, {
+        tool: 'kia_forget_session',
+        action: 'session.forget',
+        message: 'Review and confirm forgetting the stored Kia session:',
+        confirmToken,
+        preview: {
           action: `Delete the stored Kia session for ${account ?? 'the configured account'}`,
           account,
           hasSession: config.hasSession,
@@ -420,9 +470,10 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
             'The stored remember-me token is deleted from this machine. No request is sent to Kia and the account ' +
             'itself is unaffected — but the MFA bootstrap (kia_start_login → kia_send_otp → kia_verify_otp) has to ' +
             'be run again, which needs a passcode from the account owner.',
-          hint: 'Nothing was deleted. Re-run with confirm: true to forget the session.',
-        });
-      }
+          hint: 'Nothing has been deleted yet.',
+        },
+      });
+      if (gate) return gate;
 
       client.forgetSession();
       // A token injected at construction or via KIA_RMTOKEN is host config the

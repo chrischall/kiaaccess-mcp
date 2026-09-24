@@ -4,7 +4,7 @@ slug: kiaaccess
 summary: >-
   Kia Connect vehicle status, lock/unlock, climate and charging. Server-side
   login with a remember-me token that skips MFA, so it hosts without a browser.
-  Writes are confirm-gated and KIA_WRITE_MODE narrows them further.
+  Writes are confirmation-gated and KIA_WRITE_MODE narrows them further.
 env:
   - name: KIA_RMTOKEN
     secret: true
@@ -33,7 +33,7 @@ env:
     required: false
     help: >-
       Which mutating tools to register (e.g. none / all). Leave unset for the
-      conservative default; every write is confirm-gated regardless.
+      conservative default; every write is confirmation-gated regardless.
 state:
   dataDir: true
   reason: >-
