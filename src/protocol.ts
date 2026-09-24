@@ -123,13 +123,13 @@ export interface CommandSpec {
    * reports completion — re-reading `cmm/gvi` is the only proof.
    */
   proofFields: readonly string[];
-  /** Human-readable note surfaced in tool descriptions / dry-run previews. */
+  /** Human-readable note surfaced in tool descriptions / confirmation previews. */
   note?: string;
 }
 
 /**
  * Every mutating endpoint this server can call. Exported so tool registrars can
- * render an accurate dry-run preview (path + method + verification status)
+ * render an accurate confirmation preview (path + method + verification status)
  * without duplicating wire knowledge.
  */
 export const COMMAND_SPECS = {

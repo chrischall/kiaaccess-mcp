@@ -3,8 +3,9 @@
  * telematics refresh, and the last known location.
  *
  * Nothing in this file mutates the vehicle, so no tool here takes the fleet's
- * `confirm` gate — if a mutation is ever added it MUST route through
- * `KiaClient.command()` and grow a dry-run preview.
+ * confirmation gate — if a mutation is ever added it MUST route through
+ * `KiaClient.command()` and `confirmVehicleCommand` (a `confirmToken` input and
+ * a preview of the exact request).
  *
  * Three live-verified traps this file exists to respect (see `docs/KIA-API.md`):
  *

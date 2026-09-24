@@ -11,6 +11,7 @@ import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
 import type { TestHarness } from '@chrischall/mcp-utils/test';
 import type { KiaSessionClient } from '../src/tools/session.js';
 import { maskAccountId, registerSessionTools } from '../src/tools/session.js';
+import { callConfirmed, previewOf, requestConfirmation } from './confirm-helpers.js';
 
 // --- fixtures (deliberate fakes) -------------------------------------------
 
@@ -200,23 +201,23 @@ describe('kia_session_status', () => {
 // --- kia_start_login --------------------------------------------------------
 
 describe('kia_start_login', () => {
-  it('makes NO network call without confirm and previews what would be sent', async () => {
+  it('phase 1 makes NO network call and previews what would be sent', async () => {
     await mount();
-    const result = await harness.callTool('kia_start_login', {});
-    const data = parseToolResult<Record<string, unknown>>(result);
-    expect(data.dryRun).toBe(true);
+    const phaseOne = await requestConfirmation(harness, 'kia_start_login');
+    const data = phaseOne.preview;
+    expect(phaseOne.action).toBe('session.start_login');
     expect(data.method).toBe('POST');
     expect(String(data.endpoint)).toContain('authUser');
     expect(String(data.risk)).toMatch(/recaptcha/i);
     expect(stub.beginLogin).not.toHaveBeenCalled();
     // The preview describes the password without carrying it.
-    expect(textOf(result)).toContain('KIA_PASSWORD');
+    expect(JSON.stringify(data)).toContain('KIA_PASSWORD');
     expect(data.account).toBe(MASKED_ACCOUNT);
   });
 
-  it('starts the MFA challenge with confirm and reports the masked destinations', async () => {
+  it('starts the MFA challenge once confirmed and reports the masked destinations', async () => {
     await mount();
-    const result = await harness.callTool('kia_start_login', { confirm: true });
+    const result = await callConfirmed(harness, 'kia_start_login');
     expect(result.isError).toBeFalsy();
     const data = parseToolResult<Record<string, unknown>>(result);
     expect(stub.beginLogin).toHaveBeenCalledTimes(1);
@@ -240,8 +241,7 @@ describe('kia_start_login', () => {
       hasSession: false,
     });
     await mount();
-    const data = parseToolResult<Record<string, unknown>>(await harness.callTool('kia_start_login', {}));
-    expect(data.dryRun).toBe(true);
+    const data = await previewOf(harness, 'kia_start_login');
     expect(data.account).toBeNull();
     expect(String(data.action)).toContain('the configured account');
     expect(stub.beginLogin).not.toHaveBeenCalled();
@@ -250,7 +250,7 @@ describe('kia_start_login', () => {
   it('surfaces a credential rejection instead of retrying it', async () => {
     stub.beginLogin.mockRejectedValue(new Error('prof/authUser failed — credentials rejected'));
     await mount();
-    const result = await harness.callTool('kia_start_login', { confirm: true });
+    const result = await callConfirmed(harness, 'kia_start_login');
     expect(result.isError).toBe(true);
     expect(textOf(result)).toMatch(/credentials rejected/i);
     expect(stub.beginLogin).toHaveBeenCalledTimes(1);
@@ -334,12 +334,11 @@ describe('kia_verify_otp', () => {
 // --- kia_export_refresh_token ----------------------------------------------
 
 describe('kia_export_refresh_token', () => {
-  it('returns NO token without confirm and does not read it', async () => {
+  it('returns NO token on phase 1 and does not read it', async () => {
     await mount();
-    const result = await harness.callTool('kia_export_refresh_token', {});
-    const data = parseToolResult<Record<string, unknown>>(result);
-    expect(data.dryRun).toBe(true);
-    expect(textOf(result)).not.toContain(RMTOKEN);
+    const phaseOne = await requestConfirmation(harness, 'kia_export_refresh_token');
+    const data = phaseOne.preview;
+    expect(JSON.stringify(phaseOne)).not.toContain(RMTOKEN);
     expect(String(data.warning)).toMatch(/credential/i);
     expect(stub.exportRmToken).not.toHaveBeenCalled();
   });
@@ -352,20 +351,20 @@ describe('kia_export_refresh_token', () => {
       hasSession: false,
     });
     await mount();
-    const data = parseToolResult<Record<string, unknown>>(await harness.callTool('kia_export_refresh_token', {}));
-    expect(data.dryRun).toBe(true);
+    const data = await previewOf(harness, 'kia_export_refresh_token');
     expect(data.account).toBeNull();
     expect(data.hasSession).toBe(false);
     expect(String(data.action)).toContain('the configured account');
     expect(stub.exportRmToken).not.toHaveBeenCalled();
   });
 
-  it('returns the token with confirm, labelled as a credential', async () => {
+  it('returns the token once confirmed, labelled as a credential', async () => {
     await mount();
-    const result = await harness.callTool('kia_export_refresh_token', { confirm: true });
+    const result = await callConfirmed(harness, 'kia_export_refresh_token');
     expect(result.isError).toBeFalsy();
     const data = parseToolResult<Record<string, unknown>>(result);
     expect(data.rmtoken).toBe(RMTOKEN);
+    expect(stub.exportRmToken).toHaveBeenCalledTimes(1);
     expect(data.account).toBe(MASKED_ACCOUNT);
     expect(String(data.warning)).toMatch(/bypass/i);
   });
@@ -379,7 +378,7 @@ describe('kia_export_refresh_token', () => {
       hasSession: false,
     });
     await mount();
-    const result = await harness.callTool('kia_export_refresh_token', { confirm: true });
+    const result = await callConfirmed(harness, 'kia_export_refresh_token');
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('kia_start_login');
   });
@@ -393,7 +392,7 @@ describe('kia_export_refresh_token', () => {
       hasSession: false,
     });
     await mount();
-    const result = await harness.callTool('kia_export_refresh_token', { confirm: true });
+    const result = await callConfirmed(harness, 'kia_export_refresh_token');
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('KIA_USERNAME');
   });
@@ -402,14 +401,12 @@ describe('kia_export_refresh_token', () => {
 // --- kia_forget_session -----------------------------------------------------
 
 describe('kia_forget_session', () => {
-  it('deletes nothing without confirm and previews what would be discarded', async () => {
+  it('deletes nothing on phase 1 and previews what would be discarded', async () => {
     await mount();
-    const result = await harness.callTool('kia_forget_session', {});
-    const data = parseToolResult<Record<string, unknown>>(result);
-    expect(data.dryRun).toBe(true);
+    const data = await previewOf(harness, 'kia_forget_session');
     expect(data.account).toBe(MASKED_ACCOUNT);
     expect(data.hasSession).toBe(true);
-    expect(String(data.hint)).toMatch(/confirm/);
+    expect(String(data.effect)).toMatch(/MFA bootstrap/);
     expect(stub.forgetSession).not.toHaveBeenCalled();
   });
 
@@ -421,16 +418,15 @@ describe('kia_forget_session', () => {
       hasSession: false,
     });
     await mount();
-    const data = parseToolResult<Record<string, unknown>>(await harness.callTool('kia_forget_session', {}));
-    expect(data.dryRun).toBe(true);
+    const data = await previewOf(harness, 'kia_forget_session');
     expect(data.account).toBeNull();
     expect(String(data.action)).toContain('the configured account');
     expect(stub.forgetSession).not.toHaveBeenCalled();
   });
 
-  it('discards the stored token with confirm and points at the bootstrap', async () => {
+  it('discards the stored token once confirmed and points at the bootstrap', async () => {
     await mount();
-    const result = await harness.callTool('kia_forget_session', { confirm: true });
+    const result = await callConfirmed(harness, 'kia_forget_session');
     expect(result.isError).toBeFalsy();
     const data = parseToolResult<Record<string, unknown>>(result);
     expect(stub.forgetSession).toHaveBeenCalledTimes(1);
@@ -443,19 +439,35 @@ describe('kia_forget_session', () => {
     expect(textOf(result)).not.toContain(RMTOKEN);
   });
 
+  it('refuses a token minted before the session state changed, deleting nothing', async () => {
+    await mount();
+    const { confirmToken } = await requestConfirmation(harness, 'kia_forget_session');
+    // The stored session disappears between the preview and the confirmed call.
+    stub.describeConfig.mockReturnValue({
+      accountId: ACCOUNT,
+      deviceId: DEVICE_ID,
+      configured: true,
+      hasSession: false,
+    });
+    const result = await harness.callTool('kia_forget_session', { confirmToken });
+    expect(result.isError).toBe(true);
+    expect(parseToolResult<{ error: string }>(result).error).toBe('DRAFT_CHANGED');
+    expect(stub.forgetSession).not.toHaveBeenCalled();
+  });
+
   it('says the session survives when the host still supplies a token', async () => {
     // KIA_RMTOKEN (or an injected token) outlives the local delete, so the
     // caller must not be sent off to redo an MFA bootstrap it does not need.
     stub.forgetSession.mockImplementation(() => undefined);
     await mount();
     const data = parseToolResult<Record<string, unknown>>(
-      await harness.callTool('kia_forget_session', { confirm: true }),
+      await callConfirmed(harness, 'kia_forget_session'),
     );
     expect(data.forgotten).toBe(true);
     expect(data.sessionRemains).toBe(true);
     expect(String(data.nextStep)).toContain('KIA_RMTOKEN');
     expect(String(data.nextStep)).not.toContain('kia_start_login');
-    expect(textOf(await harness.callTool('kia_forget_session', { confirm: true }))).not.toContain(RMTOKEN);
+    expect(textOf(await callConfirmed(harness, 'kia_forget_session'))).not.toContain(RMTOKEN);
   });
 
   it('is a no-op that says so when there was nothing stored', async () => {
@@ -467,7 +479,7 @@ describe('kia_forget_session', () => {
     });
     await mount();
     const data = parseToolResult<Record<string, unknown>>(
-      await harness.callTool('kia_forget_session', { confirm: true }),
+      await callConfirmed(harness, 'kia_forget_session'),
     );
     expect(data.hadStoredSession).toBe(false);
     expect(data.account).toBeNull();

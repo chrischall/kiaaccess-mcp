@@ -5,7 +5,7 @@ description: This skill should be used when the user asks about their Kia vehicl
 
 # kiaaccess-mcp
 
-MCP server for the Kia Owners API used by the Kia Access app — vehicle status, location, EV charge state, and confirm-gated door, climate, and charging commands, using the user's own Kia account.
+MCP server for the Kia Owners API used by the Kia Access app — vehicle status, location, EV charge state, and confirmation-gated door, climate, and charging commands, using the user's own Kia account.
 
 - **npm:** [npmjs.com/package/kiaaccess-mcp](https://www.npmjs.com/package/kiaaccess-mcp)
 - **Source:** [github.com/chrischall/kiaaccess-mcp](https://github.com/chrischall/kiaaccess-mcp)
@@ -36,12 +36,12 @@ Add to `.mcp.json` in your project or `~/.claude/mcp.json`:
 
 Kia challenges each new device once. Start with `kia_session_status`; if it reports `hasSession: false`:
 
-1. `kia_start_login` with `confirm: true` → returns `otpKey` + `xid` and the masked destinations Kia has on file.
+1. `kia_start_login`, confirmed (see [Confirmations](#confirmations)) → returns `otpKey` + `xid` and the masked destinations Kia has on file.
 2. `kia_send_otp(otpKey, xid, notifyType)` — ask the user whether they can read `SMS` or `EMAIL` right now. The code expires in ~2 minutes.
 3. `kia_verify_otp(otpKey, xid, otp)` — same `otpKey`/`xid`, plus the code the user received.
 4. `kia_list_vehicles` to confirm, and to get the `vehicleKey` every other tool needs.
 
-The remember-me token is then stored locally and refreshes sessions silently forever; MFA is never needed again on that machine. `kia_forget_session` (confirm-gated) throws it away so the bootstrap can be repeated.
+The remember-me token is then stored locally and refreshes sessions silently forever; MFA is never needed again on that machine. `kia_forget_session` (confirmation-gated) throws it away so the bootstrap can be repeated.
 
 A server with no one to read an OTP cannot run these steps at all. Bootstrap it elsewhere and pass the exported token as `KIA_RMTOKEN`, with `KIA_DEVICE_ID` set to the same uuid on both machines — the token is minted against a device uuid and is worthless with a different one. `KIA_RMTOKEN` wins over the local store.
 
@@ -54,8 +54,8 @@ A server with no one to read an OTP cannot run these steps at all. Bootstrap it 
 |------|-------|
 | `kia_session_status` | Configured? Bootstrapped? Which write mode? No network call, no secrets. Start here when a tool says it is not configured. |
 | `kia_start_login` / `kia_send_otp` / `kia_verify_otp` | The three bootstrap steps above. |
-| `kia_forget_session(confirm)` | Deletes the locally stored session. Local only — Kia is not contacted. |
-| `kia_export_refresh_token(confirm)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a locally-bootstrapped session into a deployment that cannot bootstrap itself, via `KIA_RMTOKEN`. Never call it to "check the session"; use `kia_session_status`. |
+| `kia_forget_session(confirmToken?)` | Deletes the locally stored session. Local only — Kia is not contacted. |
+| `kia_export_refresh_token(confirmToken?)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a locally-bootstrapped session into a deployment that cannot bootstrap itself, via `KIA_RMTOKEN`. Never call it to "check the session"; use `kia_session_status`. |
 
 ### Reads
 | Tool | Notes |
@@ -66,18 +66,22 @@ A server with no one to read an OTP cannot run these steps at all. Bootstrap it 
 | `kia_vehicle_location(vehicle_key)` | Last reported position + map link. Not a live fix. |
 | `kia_charge_targets(vinKey)` | Target state of charge per plug type. |
 
-### Commands (all take `confirm`)
+### Commands (all confirmation-gated, all take `confirmToken?`)
 | Tool | Mode | Notes |
 |------|------|-------|
-| `kia_start_climate(vinKey, temperature?, durationMinutes?, defrost?, waitSeconds?, confirm)` | `comfort` | Verified live. Temperature is best-effort — do not promise the user an exact cabin temperature. |
-| `kia_stop_climate(vinKey, waitSeconds?, confirm)` | `comfort` | Verified live. |
+| `kia_start_climate(vinKey, temperature?, durationMinutes?, defrost?, waitSeconds?, confirmToken?)` | `comfort` | Verified live. Temperature is best-effort — do not promise the user an exact cabin temperature. |
+| `kia_stop_climate(vinKey, waitSeconds?, confirmToken?)` | `comfort` | Verified live. |
 | `kia_start_charge` / `kia_stop_charge` / `kia_set_charge_limits` | `comfort` | Verified against a plugged-in car. A success status means Kia accepted the command, not that the car acted — confirm charge start/stop via `kia_vehicle_status` (`evStatus.batteryCharge`), and limits via `kia_charge_targets`. `kia_set_charge_limits` REPLACES the target list, so send both plug types. Starting a charge on an unplugged car succeeds and does nothing. |
-| `kia_lock_doors(vinKey, waitSeconds?, confirm)` | `all` | Verified live by re-reading `doorLock`. |
-| `kia_unlock_doors(vinKey, waitSeconds?, confirm)` | `all` | Leaves the car unsecured. Only when the user explicitly asked for this vehicle. |
+| `kia_lock_doors(vinKey, waitSeconds?, confirmToken?)` | `all` | Verified live by re-reading `doorLock`. |
+| `kia_unlock_doors(vinKey, waitSeconds?, confirmToken?)` | `all` | Leaves the car unsecured. Only when the user explicitly asked for this vehicle. |
+
+## Confirmations
+
+Every write — each command, plus `kia_start_login`, `kia_forget_session` and `kia_export_refresh_token` — asks the user first. A client that can show a confirmation prompt shows one and the tool proceeds on approval. Otherwise the first call does nothing and returns `status: "confirmation-required"` with a `preview` and a `confirmToken`; show the user the preview, get their approval in chat (under the default `MCP_CONFIRM_MODE=ask-user`), then call the SAME tool again with the SAME arguments plus `confirmToken`. The token works once (`TOKEN_REUSED` after that), expires after `MCP_CONFIRM_TTL_SECONDS` (default 600), and is bound to the exact request: changing anything that would be sent returns `DRAFT_CHANGED` with a fresh preview and token. Under `MCP_CONFIRM_MODE=refuse` such clients get `reason: "confirmation-unsupported"` and nothing is sent.
 
 ## Reading a command result
 
-- **Without `confirm: true` nothing happens.** The tool makes no network call and returns `dryRun: true` with the exact request it would send. Show the user that preview; never describe a dry run as if the car acted.
+- **`status: "confirmation-required"` means nothing happened.** The tool made no network call and returned a `preview` of the exact request plus a `confirmToken`. Show the user that preview; never describe it as if the car acted.
 - **`commandAccepted` ≠ `stateConfirmed`.** Kia returning success only means the request was accepted. Only `stateConfirmed: true` means the car actually reads locked / unlocked / climate-on. Changes take 30–60 seconds; `waitSeconds` controls how long the tool keeps re-reading. It defaults to 30 so the call finishes inside a client's own request timeout; an unconfirmed result (or a client-side timeout) still means the command WAS sent — re-read the vehicle status, never re-send the command to "retry".
 - **`stateConfirmed: false` is not "it failed"** — it means the tool stopped waiting. Say exactly that, and offer to re-read `kia_vehicle_status`.
 - **On an EV, `engine` stays false with the climate running.** `ign3` is the ignition proxy. Never report the car as off because `engine` is false.

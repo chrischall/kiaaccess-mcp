@@ -4,13 +4,13 @@
 [![npm](https://img.shields.io/npm/v/kiaaccess-mcp)](https://www.npmjs.com/package/kiaaccess-mcp)
 [![license](https://img.shields.io/npm/l/kiaaccess-mcp)](LICENSE)
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that connects Claude to your own Kia vehicle through the Kia Owners API the Kia Access mobile app uses: vehicle status, location, odometer, EV charge state, and confirm-gated door, climate, and charging commands.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that connects Claude to your own Kia vehicle through the Kia Owners API the Kia Access mobile app uses: vehicle status, location, odometer, EV charge state, and confirmation-gated door, climate, and charging commands.
 
 > [!WARNING]
 > **AI-developed project.** This codebase was built and is maintained by [Claude Code](https://www.anthropic.com/claude). No human has audited the implementation. Review the code and the tool permissions before pointing it at a real car.
 
 > [!CAUTION]
-> **This server can move a two-tonne object and can unlock your car.** Every command tool is confirm-gated — without `confirm: true` it makes no network call at all and returns a dry-run preview — and door lock/unlock is not even registered unless you opt in with `KIA_WRITE_MODE=all`. Read [Vehicle commands](#vehicle-commands) before changing that.
+> **This server can move a two-tonne object and can unlock your car.** Every command tool asks you to confirm before it acts — with a confirmation prompt where the client supports one, otherwise a preview plus a one-time token that only a repeat call can use (see [Confirmations](#confirmations)) — and door lock/unlock is not even registered unless you opt in with `KIA_WRITE_MODE=all`. Read [Vehicle commands](#vehicle-commands) before changing that.
 
 ## What you can do
 
@@ -84,19 +84,19 @@ Kia challenges every new device with a one-time passcode. This server bootstraps
 Run it through Claude, in this order:
 
 1. **`kia_session_status`** — confirms credentials are present. If it reports `hasSession: false`, continue.
-2. **`kia_start_login`** (needs `confirm: true`) — sends your credentials, returns an `otpKey` and an `xid`, plus the masked phone/email Kia has on file.
+2. **`kia_start_login`** (asks you to confirm first) — sends your credentials, returns an `otpKey` and an `xid`, plus the masked phone/email Kia has on file.
 3. **`kia_send_otp`** — pick `SMS` or `EMAIL`. The passcode expires in about two minutes.
 4. **`kia_verify_otp`** — hand it the passcode. The token is stored locally and is deliberately **not** returned.
 5. **`kia_list_vehicles`** — confirms the session works and gives you the `vehicleKey` every other tool takes.
 
-To start over (revoked token, changed password, handing the machine on), run **`kia_forget_session`** with `confirm: true` and repeat from step 2.
+To start over (revoked token, changed password, handing the machine on), run **`kia_forget_session`** (asks you to confirm first) and repeat from step 2.
 
 ### Running it somewhere with no phone to read
 
 The bootstrap needs a human once. A deployment that has no one to read an OTP — a remote host — cannot run it at all, so bootstrap on a machine that can and move the token:
 
 1. Set `KIA_DEVICE_ID` to a fixed uuid **before** the bootstrap, on both machines. The `rmtoken` is minted against a device uuid and is worthless with a different one, and `kia_session_status` only ever reports a truncated prefix — so if you let it be generated, you cannot read back the value you need.
-2. Bootstrap as above, then run `kia_export_refresh_token` with `confirm: true`.
+2. Bootstrap as above, then run `kia_export_refresh_token` and confirm it.
 3. Give the remote deployment that value as `KIA_RMTOKEN`, alongside `KIA_USERNAME`, `KIA_PASSWORD` and the same `KIA_DEVICE_ID`.
 
 `KIA_RMTOKEN` takes precedence over anything in the local session store, so the deployment's session is whatever you handed it rather than whatever it last wrote. Treat the value like the password it stands in for: it bypasses MFA, and with the account password it grants full control of the vehicle.
@@ -119,8 +119,18 @@ An unrecognised value **fails closed to `none`** and warns on stderr — a typo 
 
 Two more rules hold for every command:
 
-- **Confirm-gated.** Without `confirm: true` there is no network call at all, just a preview of the exact request that would be sent.
+- **Confirmation-gated.** Nothing is sent until you confirm. The confirmation shows the exact request that would be sent; until then there is no network call at all. See [Confirmations](#confirmations).
 - **Accepted is not confirmed.** Kia answering "success" only means the request was accepted. The only proof a command took effect is re-reading the vehicle and diffing the field, so results report `commandAccepted` and `stateConfirmed` separately. Observed changes took 30–60 seconds.
+
+## Confirmations
+
+Every write tool (the commands above, plus `kia_start_login`, `kia_forget_session` and `kia_export_refresh_token`) asks you to confirm before it acts. A client that can show a confirmation prompt (Claude Code) shows one, with the exact request. A client that cannot (claude.ai, Claude Desktop) gets a two-step flow instead: the first call does nothing and returns a preview plus a `confirmToken`, and only a repeat call carrying that token proceeds. The token is bound to the exact request previewed — change an argument and it is refused (`DRAFT_CHANGED`) with a fresh preview; use it twice and the second call is refused (`TOKEN_REUSED`).
+
+| variable | default | |
+|---|---|---|
+| `MCP_CONFIRM_MODE` | `ask-user` | What a write does on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop). `ask-user`: two steps — the first call does nothing and returns a preview plus a token, and the model must get your approval in chat before calling again with it. `auto`: the same two steps, but the model may use the token after reviewing the preview itself. `refuse`: writes are refused on such clients. A client that can show prompts (Claude Code) always gets the real prompt. An unrecognised value is treated as `refuse`. |
+| `MCP_CONFIRM_TTL_SECONDS` | `600` | How long a token stays valid. |
+| `MCP_CONFIRM_SECRET` | random per process | Signing key; set it only if tokens must survive a server restart. |
 
 ## Tools
 
@@ -129,11 +139,11 @@ Two more rules hold for every command:
 | Tool | Notes |
 |---|---|
 | `kia_session_status` | Configured? Bootstrapped? Which write mode? No network call, no secrets — the email is masked and the device id truncated. |
-| `kia_start_login` | Step 1 of the MFA bootstrap. Confirm-gated, because a rejection has a permanent cost. |
+| `kia_start_login` | Step 1 of the MFA bootstrap. Confirmation-gated, because a rejection has a permanent cost. |
 | `kia_send_otp` | Step 2 — delivers the passcode by `SMS` or `EMAIL`. |
 | `kia_verify_otp` | Step 3 — exchanges the passcode for a stored session. Returns no secret. |
-| `kia_forget_session` | Discards the stored token so the bootstrap can be re-run. Local only; confirm-gated. |
-| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a locally-bootstrapped session into a deployment that cannot run the bootstrap itself, via `KIA_RMTOKEN`. Confirm-gated. |
+| `kia_forget_session` | Discards the stored token so the bootstrap can be re-run. Local only; confirmation-gated. |
+| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a locally-bootstrapped session into a deployment that cannot run the bootstrap itself, via `KIA_RMTOKEN`. Confirmation-gated. |
 
 ### Reads
 

@@ -12,7 +12,7 @@
     {
       "name": "kiaaccess",
       "source": "./",
-      "description": "Vehicle status, location, odometer, EV charge state, and confirm-gated door, climate, and charging commands",
+      "description": "Vehicle status, location, odometer, EV charge state, and confirmation-gated door, climate, and charging commands",
       "version": "1.0.3",
       "author": {
         "name": "Chris Chall"

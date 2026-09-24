@@ -167,7 +167,7 @@ export interface KiaCommandResult {
 }
 
 // ---------------------------------------------------------------------------
-// Body builders (exported so tool registrars can render an accurate dry-run
+// Body builders (exported so tool registrars can render an accurate confirmation
 // preview of exactly what would be sent).
 // ---------------------------------------------------------------------------
 
