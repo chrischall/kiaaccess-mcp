@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.3...v1.1.0) (2026-09-24)
+
+
+### Features
+
+* confirm writes with a preview token instead of confirm: true ([#110](https://github.com/chrischall/kiaaccess-mcp/issues/110)) ([331373c](https://github.com/chrischall/kiaaccess-mcp/commit/331373c7680198d06eb9c4207f9af1b59ce8c836))
+
 ## [1.0.3](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.2...v1.0.3) (2026-09-23)
 
 
