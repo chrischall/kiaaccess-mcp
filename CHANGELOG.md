@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.0...v1.1.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv in the production-dependencies group ([#114](https://github.com/chrischall/kiaaccess-mcp/issues/114)) ([4582128](https://github.com/chrischall/kiaaccess-mcp/commit/4582128597b03eb1f2274c53867a8c7ba3314c25))
+
 ## [1.1.0](https://github.com/chrischall/kiaaccess-mcp/compare/v1.0.3...v1.1.0) (2026-09-24)
 
 
