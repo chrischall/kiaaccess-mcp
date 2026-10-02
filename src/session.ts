@@ -41,19 +41,33 @@ export function sessionFilePath(): string {
 
 const normalizeAccountId = (key: string): string => key.trim().toLowerCase();
 
+const stores = new Map<string, SessionStore<KiaStoredSession>>();
+
 /**
- * Open the store. Constructed per call (it reads disk in its constructor) so
- * `KIA_SESSION_FILE` is honoured dynamically and a session written by another
- * process is picked up.
+ * The store for the current {@link sessionFilePath} — one per file, opened in
+ * mcp-utils' cross-process `fresh` mode: it re-reads the file before every
+ * access and does each save/clear as a read-modify-write under
+ * `<file>.lock`, so a session written or cleared by another process (Claude
+ * Desktop beside Claude Code) is picked up and never overwritten from a stale
+ * snapshot. Replaces re-constructing the store on every call
+ * (chrischall/fleet-audit#1116), which re-read but had no lock. Looked up per
+ * call so `KIA_SESSION_FILE` is still honoured dynamically.
  */
 export function openSessionStore(): SessionStore<KiaStoredSession> {
-  return new SessionStore<KiaStoredSession>({
-    filePath: sessionFilePath(),
-    keyOf: (session) => session.accountId,
-    // Accounts are emails, not origins — the default origin normalizer would
-    // mangle them.
-    normalizeKey: normalizeAccountId,
-  });
+  const filePath = sessionFilePath();
+  let store = stores.get(filePath);
+  if (!store) {
+    store = new SessionStore<KiaStoredSession>({
+      filePath,
+      keyOf: (session) => session.accountId,
+      // Accounts are emails, not origins — the default origin normalizer would
+      // mangle them.
+      normalizeKey: normalizeAccountId,
+      fresh: true,
+    });
+    stores.set(filePath, store);
+  }
+  return store;
 }
 
 /**

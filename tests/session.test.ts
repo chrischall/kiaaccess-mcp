@@ -9,8 +9,10 @@ import {
   diskSessionIO,
   type KiaStoredSession,
   nullSessionIO,
+  openSessionStore,
   sessionFilePath,
 } from '../src/session.js';
+import { SessionStore } from '@chrischall/mcp-utils/session';
 
 const ACCOUNT = 'driver@example.test';
 
@@ -106,6 +108,60 @@ describe('diskSessionIO', () => {
     expect(() => diskSessionIO.save(record())).not.toThrow();
     expect(() => diskSessionIO.clear(ACCOUNT)).not.toThrow();
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+// fleet-audit#1116: the store used to be re-constructed on every call so a
+// sibling process's writes were seen. It is now ONE store per file, opened with
+// mcp-utils' cross-process `fresh` mode (re-read before every access, locked
+// read-modify-write on every save/clear).
+describe('openSessionStore (one fresh store per file)', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'kiaaccess-store-'));
+    process.env.KIA_SESSION_FILE = join(dir, 'session.json');
+  });
+
+  afterEach(() => {
+    delete process.env.KIA_SESSION_FILE;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Another server process sharing the same file. */
+  const sibling = () =>
+    new SessionStore<KiaStoredSession>({
+      filePath: process.env.KIA_SESSION_FILE!,
+      keyOf: (s) => s.accountId,
+      normalizeKey: (k) => k.trim().toLowerCase(),
+      fresh: true,
+    });
+
+  it('reuses one store per file instead of re-opening it on every call', () => {
+    expect(openSessionStore()).toBe(openSessionStore());
+  });
+
+  it('still honours a changed KIA_SESSION_FILE', () => {
+    const first = openSessionStore();
+    process.env.KIA_SESSION_FILE = join(dir, 'other.json');
+    expect(openSessionStore()).not.toBe(first);
+  });
+
+  it("sees a sibling process's sign-in made after the store was opened", () => {
+    expect(diskSessionIO.load(ACCOUNT)).toBeNull();
+    sibling().add(record({ rmtoken: 'from-sibling' }));
+    expect(diskSessionIO.load(ACCOUNT)?.rmtoken).toBe('from-sibling');
+  });
+
+  it("does not resurrect a session a sibling cleared, and keeps a sibling's other account", () => {
+    diskSessionIO.save(record());
+    const other = sibling();
+    other.remove(ACCOUNT);
+    other.add(record({ accountId: 'second@example.test', rmtoken: 'second' }));
+    diskSessionIO.save(record({ accountId: 'third@example.test', rmtoken: 'third' }));
+    expect(diskSessionIO.load(ACCOUNT)).toBeNull();
+    expect(diskSessionIO.load('second@example.test')?.rmtoken).toBe('second');
+    expect(diskSessionIO.load('third@example.test')?.rmtoken).toBe('third');
   });
 });
 
