@@ -1009,7 +1009,11 @@ describe('verifyCommand (over mcp-utils verifyAfterWrite)', () => {
 
   it('propagates a failed re-read, as before', async () => {
     const read = vi.fn().mockRejectedValue(new Error('Kia 503'));
-    await expect(run(client.verifyCommand(read, () => false))).rejects.toThrow('Kia 503');
+    // Attach the rejection handler BEFORE advancing the fake clock, so the
+    // rejection is never momentarily unhandled.
+    const settled = expect(client.verifyCommand(read, () => false)).rejects.toThrow('Kia 503');
+    await vi.advanceTimersByTimeAsync(0);
+    await settled;
   });
 
   it('reports progress while polling, when the caller asked for it', async () => {

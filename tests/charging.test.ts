@@ -382,6 +382,26 @@ describe('kia_set_charge_limits', () => {
     expect(parsed.verification.hint).toMatch(/accepted the command|accepted the request/);
   });
 
+  it('reports targets:null — not a missing field — when the caller cancelled before any re-read', async () => {
+    const stub = makeClient([[{ plugType: 0, targetSOClevel: 50 }]]);
+    stub.verifyCommand.mockImplementationOnce(async () => ({
+      verified: false,
+      attempts: 0,
+      elapsedMs: 0,
+      snapshot: undefined,
+      changedFields: [],
+      cancelled: true,
+    }));
+    harness = await harnessFor(stub);
+
+    const parsed = parseToolResult<{ verification: { verified: boolean; targets: unknown } }>(
+      await callConfirmed(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets }),
+    );
+
+    expect(parsed.verification.verified).toBe(false);
+    expect(parsed.verification).toHaveProperty('targets', null);
+  });
+
   it('skips the baseline read and the re-read when verify:false', async () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
