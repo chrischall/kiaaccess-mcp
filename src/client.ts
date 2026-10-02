@@ -22,7 +22,13 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { McpToolError, currentCallSignal, loadDotenvSafely, readEnvVar, reportProgress } from '@chrischall/mcp-utils';
+import {
+  McpToolError,
+  loadDotenvSafely,
+  readEnvVar,
+  reportProgress,
+  verifyAfterWrite,
+} from '@chrischall/mcp-utils';
 import {
   KiaCredentialError,
   type KiaCredentials,
@@ -284,15 +290,11 @@ export interface VerifyCommandOptions<T> {
   /** Delay between re-reads (default 5s). */
   intervalMs?: number;
   /**
-   * Stop polling when this aborts. Defaults to the running tool call's
+   * Stop polling when this aborts. Always combined with the running tool call's
    * cancellation, so a caller that cancelled or timed out does not leave this
    * loop hitting Kia for up to the whole wait budget.
    */
   signal?: AbortSignal;
-  /** Injectable for tests. Receives {@link signal} so it can wake early. */
-  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
-  /** Injectable clock for tests. */
-  now?: () => number;
 }
 
 /** Outcome of a re-read-and-diff verification. */
@@ -301,28 +303,13 @@ export interface VerifyCommandResult<T> {
   /** Number of re-reads performed. */
   attempts: number;
   elapsedMs: number;
-  /** The last snapshot read. */
-  snapshot: T;
+  /** The last snapshot read; `undefined` when the caller cancelled before any read. */
+  snapshot: T | undefined;
   /** Fields that changed vs. the baseline, `syncDate` excluded. */
   changedFields: string[];
   /** Polling stopped early because the caller cancelled. */
   cancelled: boolean;
 }
-
-/**
- * Sleep that resolves early (never rejects) when `signal` aborts. Only ever
- * called with a signal that has not yet aborted — the poll loop checks first.
- */
-const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
-  new Promise((resolve) => {
-    const done = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    signal?.addEventListener('abort', done, { once: true });
-  });
 
 // ---------------------------------------------------------------------------
 // Client
@@ -879,39 +866,35 @@ export class KiaClient {
     predicate: (snapshot: T) => boolean,
     opts: VerifyCommandOptions<T> = {},
   ): Promise<VerifyCommandResult<T>> {
-    const timeoutMs = opts.timeoutMs ?? 60_000;
-    const intervalMs = opts.intervalMs ?? 5_000;
-    const sleep = opts.sleep ?? defaultSleep;
-    const now = opts.now ?? Date.now;
-    const signal = opts.signal ?? currentCallSignal();
-    const started = now();
+    // The loop itself — deadline, abort-aware waits, progress — is the shared
+    // verifyAfterWrite, lifted from this method (fleet-audit#1176). What stays
+    // here is Kia's proof: the syncDate-blind diff against the baseline.
+    let first: { snapshot: T } | undefined;
+    const check = await verifyAfterWrite<T>({
+      read: async () => {
+        const snapshot = await readFn();
+        first ??= { snapshot };
+        return snapshot;
+      },
+      isSettled: predicate,
+      timeoutMs: opts.timeoutMs ?? 60_000,
+      intervalMs: opts.intervalMs ?? 5_000,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      onProgress: ({ attempt, elapsedMs, timeoutMs }) =>
+        reportProgress(elapsedMs, timeoutMs, `Waiting for the vehicle to confirm (read ${attempt})`),
+    });
+    // A failed re-read propagates, as it always has: the tool layer decides
+    // whether it was the caller's cancellation or a real failure.
+    if (check.outcome === 'read_failed') throw check.error;
 
-    let snapshot = await readFn();
-    let attempts = 1;
-    const baseline = opts.baseline ?? snapshot;
-    let verified = predicate(snapshot);
-
-    while (!verified && !signal?.aborted && now() - started + intervalMs <= timeoutMs) {
-      await sleep(intervalMs, signal);
-      if (signal?.aborted) break;
-      // Keep a progress-aware client informed while the car catches up. A
-      // no-op unless the caller sent a progressToken; a failed notification
-      // must never cost the verification result.
-      await reportProgress(now() - started, timeoutMs, `Waiting for the vehicle to confirm (read ${attempts + 1})`).catch(
-        () => undefined,
-      );
-      snapshot = await readFn();
-      attempts += 1;
-      verified = predicate(snapshot);
-    }
-
+    const baseline = opts.baseline ?? first?.snapshot;
     return {
-      verified,
-      attempts,
-      elapsedMs: now() - started,
-      snapshot,
-      changedFields: diffIgnoringSyncDate(baseline, snapshot),
-      cancelled: signal?.aborted === true,
+      verified: check.settled,
+      attempts: check.attempts,
+      elapsedMs: check.elapsedMs,
+      snapshot: check.snapshot,
+      changedFields: check.snapshot === undefined ? [] : diffIgnoringSyncDate(baseline, check.snapshot),
+      cancelled: check.outcome === 'cancelled',
     };
   }
 }

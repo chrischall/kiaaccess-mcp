@@ -131,6 +131,7 @@ Every write tool (the commands above, plus `kia_start_login`, `kia_forget_sessio
 | `MCP_CONFIRM_MODE` | `ask-user` | What a write does on a client that cannot show a confirmation prompt (claude.ai, Claude Desktop). `ask-user`: two steps — the first call does nothing and returns a preview plus a token, and the model must get your approval in chat before calling again with it. `auto`: the same two steps, but the model may use the token after reviewing the preview itself. `refuse`: writes are refused on such clients. A client that can show prompts (Claude Code) always gets the real prompt. An unrecognised value is treated as `refuse`. |
 | `MCP_CONFIRM_TTL_SECONDS` | `600` | How long a token stays valid. |
 | `MCP_CONFIRM_SECRET` | random per process | Signing key; set it only if tokens must survive a server restart. |
+| `MCP_HOST_CONFIRM_SECRET` | unset | Set by mcp-host for this registration (it has a data dir). Used when `MCP_CONFIRM_SECRET` is unset and `MCP_DATA_DIR` is absolute: a token survives the hosted child idling out between the preview and the confirmed call, and spent tokens are recorded under the data dir so a restart cannot re-accept one. |
 
 ## Tools
 

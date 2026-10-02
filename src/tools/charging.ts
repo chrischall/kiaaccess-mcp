@@ -385,7 +385,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
           attempts: check.attempts,
           elapsedMs: check.elapsedMs,
           changedFields: check.changedFields,
-          targets: check.snapshot,
+          targets: check.snapshot ?? null,
           hint: check.verified
             ? 'Confirmed by re-reading evc/gts — the requested targets are what the car reports.'
             : `Kia accepted the request but evc/gts still does not report the requested targets. ${ACCEPTED_HINT}`,
