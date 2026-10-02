@@ -877,8 +877,23 @@ describe('extractVehicleStatus', () => {
   });
 });
 
-describe('verifyCommand', () => {
+describe('verifyCommand (over mcp-utils verifyAfterWrite)', () => {
   const client = new KiaClient({ deviceId: DEVICE_ID, sessionIO: memoryIO() });
+
+  // verifyAfterWrite owns the sleep and the clock now, so these drive it with
+  // fake timers rather than injected sleep/now.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Run a verification to completion under fake timers. */
+  async function run<T>(pending: Promise<T>, advanceMs = 600_000): Promise<T> {
+    await vi.advanceTimersByTimeAsync(advanceMs);
+    return pending;
+  }
 
   it('re-reads until the predicate holds and reports the changed fields', async () => {
     const baseline = { doorLock: false, syncDate: 1 };
@@ -887,140 +902,143 @@ describe('verifyCommand', () => {
       { doorLock: true, syncDate: 3 },
     ];
     let index = 0;
-    const sleep = vi.fn().mockResolvedValue(undefined);
 
-    const result = await client.verifyCommand(
-      async () => snapshots[index++],
-      (snapshot) => snapshot.doorLock === true,
-      { baseline, timeoutMs: 30_000, intervalMs: 5_000, sleep, now: () => 0 },
+    const result = await run(
+      client.verifyCommand(
+        async () => snapshots[index++],
+        (snapshot) => snapshot.doorLock === true,
+        { baseline, timeoutMs: 30_000, intervalMs: 5_000 },
+      ),
     );
 
     expect(result.verified).toBe(true);
     expect(result.attempts).toBe(2);
     expect(result.changedFields).toEqual(['doorLock']);
     expect(result.snapshot).toEqual({ doorLock: true, syncDate: 3 });
-    expect(sleep).toHaveBeenCalledWith(5_000, undefined);
+    expect(result.elapsedMs).toBe(5_000);
   });
 
   it('EXCLUDES syncDate from change detection (including it makes every command look successful)', async () => {
     const baseline = { doorLock: false, syncDate: '2026-07-27T19:00:00Z' };
     const after = { doorLock: false, syncDate: '2026-07-27T19:05:00Z' };
 
-    const result = await client.verifyCommand(async () => after, () => false, {
-      baseline,
-      timeoutMs: 0,
-      sleep: async () => {},
-    });
+    const result = await run(client.verifyCommand(async () => after, () => false, { baseline, timeoutMs: 0 }));
 
     expect(result.verified).toBe(false);
     expect(result.changedFields).toEqual([]);
   });
 
+  it('checks exactly once with a zero budget (waitSeconds: 0)', async () => {
+    const read = vi.fn().mockResolvedValue({ doorLock: false });
+    const result = await run(client.verifyCommand(read, () => false, { timeoutMs: 0 }));
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(result.snapshot).toEqual({ doorLock: false });
+    expect(result.cancelled).toBe(false);
+  });
+
   it('gives up after the timeout instead of polling forever', async () => {
-    let clock = 0;
-    const sleep = vi.fn().mockImplementation(async () => {
-      clock += 5_000;
-    });
     const read = vi.fn().mockResolvedValue({ doorLock: false });
 
-    const result = await client.verifyCommand(read, () => false, {
-      timeoutMs: 12_000,
-      intervalMs: 5_000,
-      sleep,
-      now: () => clock,
-    });
+    const result = await run(
+      client.verifyCommand(read, () => false, { timeoutMs: 12_000, intervalMs: 5_000 }),
+    );
 
     expect(result.verified).toBe(false);
     expect(result.attempts).toBe(3);
     expect(result.elapsedMs).toBe(10_000);
+    expect(result.cancelled).toBe(false);
   });
 
-  it('verifies on the very first read without sleeping', async () => {
-    const sleep = vi.fn();
-    const result = await client.verifyCommand(async () => ({ doorLock: true }), (s) => s.doorLock, { sleep });
+  it('verifies on the very first read without waiting', async () => {
+    const result = await run(
+      client.verifyCommand(async () => ({ doorLock: true }), (s) => s.doorLock),
+      0,
+    );
     expect(result.verified).toBe(true);
     expect(result.attempts).toBe(1);
-    expect(sleep).not.toHaveBeenCalled();
+    expect(result.elapsedMs).toBe(0);
   });
 
   it('stops polling as soon as the caller cancels, instead of hitting Kia for minutes', async () => {
     const controller = new AbortController();
-    let clock = 0;
     const read = vi.fn().mockResolvedValue({ doorLock: false });
-    const sleep = vi.fn().mockImplementation(async () => {
-      clock += 5_000;
-      if (clock >= 10_000) controller.abort(new Error('cancelled by client'));
-    });
+    setTimeout(() => controller.abort(new Error('cancelled by client')), 7_500);
 
-    const result = await client.verifyCommand(read, () => false, {
-      timeoutMs: 300_000,
-      intervalMs: 5_000,
-      sleep,
-      now: () => clock,
-      signal: controller.signal,
-    });
+    const result = await run(
+      client.verifyCommand(read, () => false, {
+        timeoutMs: 300_000,
+        intervalMs: 5_000,
+        signal: controller.signal,
+      }),
+    );
 
     expect(result.verified).toBe(false);
     expect(result.cancelled).toBe(true);
-    // Initial read + the one after the first sleep; the abort during the
-    // second sleep ends the loop without another read.
+    // The read at 0 and the one at 5s; the abort during the second wait ends
+    // the loop without another read.
     expect(read).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(result.elapsedMs).toBe(7_500);
   });
 
   it('does not poll at all when the caller has already gone', async () => {
     const controller = new AbortController();
     controller.abort();
     const read = vi.fn().mockResolvedValue({ doorLock: false });
-    const sleep = vi.fn();
 
-    const result = await client.verifyCommand(read, () => false, { sleep, signal: controller.signal });
+    const result = await run(client.verifyCommand(read, () => false, { signal: controller.signal }));
 
     expect(result.cancelled).toBe(true);
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(sleep).not.toHaveBeenCalled();
+    expect(result.verified).toBe(false);
+    expect(read).not.toHaveBeenCalled();
+    expect(result.snapshot).toBeUndefined();
   });
 
-  it('honours the ambient tool-call signal by default, cutting the default sleep short', async () => {
+  it('honours the ambient tool-call signal by default, cutting the wait short', async () => {
     const controller = new AbortController();
     const read = vi.fn().mockResolvedValue({ doorLock: false });
-    const started = Date.now();
     setTimeout(() => controller.abort(), 20);
 
     const result = await withCallSignal(controller.signal, () =>
-      client.verifyCommand(read, () => false, { timeoutMs: 60_000, intervalMs: 30_000 }),
+      run(client.verifyCommand(read, () => false, { timeoutMs: 60_000, intervalMs: 30_000 })),
     );
 
     expect(result.cancelled).toBe(true);
     expect(read).toHaveBeenCalledTimes(1);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result.elapsedMs).toBe(20);
+  });
+
+  it('propagates a failed re-read, as before', async () => {
+    const read = vi.fn().mockRejectedValue(new Error('Kia 503'));
+    await expect(run(client.verifyCommand(read, () => false))).rejects.toThrow('Kia 503');
   });
 
   it('reports progress while polling, when the caller asked for it', async () => {
     const notify = vi.fn();
     const request = { _meta: { progressToken: 'tok-1' }, notify };
-    let clock = 0;
     const snapshots = [{ doorLock: false }, { doorLock: false }, { doorLock: true }];
     let index = 0;
 
     await withCallSignal(
       new AbortController().signal,
       () =>
-        client.verifyCommand(async () => snapshots[index++], (s) => s.doorLock, {
-          timeoutMs: 30_000,
-          intervalMs: 5_000,
-          sleep: async () => {
-            clock += 5_000;
-          },
-          now: () => clock,
-        }),
+        run(
+          client.verifyCommand(async () => snapshots[index++], (s) => s.doorLock, {
+            timeoutMs: 30_000,
+            intervalMs: 5_000,
+          }),
+        ),
       request,
     );
 
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify.mock.calls[0][0]).toMatchObject({
       method: 'notifications/progress',
-      params: { progressToken: 'tok-1', progress: 5_000, total: 30_000 },
+      params: {
+        progressToken: 'tok-1',
+        progress: 5_000,
+        total: 30_000,
+        message: 'Waiting for the vehicle to confirm (read 2)',
+      },
     });
   });
 
@@ -1032,12 +1050,12 @@ describe('verifyCommand', () => {
     const result = await withCallSignal(
       new AbortController().signal,
       () =>
-        client.verifyCommand(async () => snapshots[index++], (s) => s.doorLock, {
-          intervalMs: 1,
-          timeoutMs: 5_000,
-          sleep: async () => {},
-          now: () => 0,
-        }),
+        run(
+          client.verifyCommand(async () => snapshots[index++], (s) => s.doorLock, {
+            intervalMs: 1,
+            timeoutMs: 5_000,
+          }),
+        ),
       request,
     );
 
@@ -1047,11 +1065,12 @@ describe('verifyCommand', () => {
   it('diffs against the first read when no baseline is supplied', async () => {
     const snapshots = [{ ign3: false }, { ign3: true }];
     let index = 0;
-    const result = await client.verifyCommand(async () => snapshots[index++], (s) => s.ign3, {
-      intervalMs: 1,
-      timeoutMs: 5_000,
-      now: () => 0,
-    });
+    const result = await run(
+      client.verifyCommand(async () => snapshots[index++], (s) => s.ign3, {
+        intervalMs: 1,
+        timeoutMs: 5_000,
+      }),
+    );
     expect(result.changedFields).toEqual(['ign3']);
   });
 });

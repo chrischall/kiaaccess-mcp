@@ -377,7 +377,7 @@ async function runCommand(
     stateConfirmed: verification.verified,
     cancelled: verification.cancelled,
     expected: plan.expect,
-    observed: observeProof(verification.snapshot, spec.proofFields),
+    observed: observeProof(verification.snapshot ?? null, spec.proofFields),
     baselineObserved: observeProof(baseline, spec.proofFields),
     changedFields: verification.changedFields,
     attempts: verification.attempts,
