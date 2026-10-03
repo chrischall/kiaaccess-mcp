@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.3](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.2...v1.1.3) (2026-10-03)
+
+
+### Bug Fixes
+
+* **deps:** adopt @chrischall/mcp-utils 2.12.0 verifyAfterWrite and host confirm secret ([#125](https://github.com/chrischall/kiaaccess-mcp/issues/125)) ([889cff8](https://github.com/chrischall/kiaaccess-mcp/commit/889cff83c99ac77d66e06e515e2580aa61fecf5a))
+* **deps:** bump @chrischall/mcp-utils to 2.10.0 ([#123](https://github.com/chrischall/kiaaccess-mcp/issues/123)) ([3662a9e](https://github.com/chrischall/kiaaccess-mcp/commit/3662a9e297cdc401a8ff64136a994d048e733522))
+* **deps:** bump @chrischall/mcp-utils to 2.13.0 ([#128](https://github.com/chrischall/kiaaccess-mcp/issues/128)) ([b773d4d](https://github.com/chrischall/kiaaccess-mcp/commit/b773d4d0091bd2e235804bd308668efb7436e1a1))
+* keep write approvals valid across a hosted restart (mcp-utils 2.11.0) ([#124](https://github.com/chrischall/kiaaccess-mcp/issues/124)) ([8194b32](https://github.com/chrischall/kiaaccess-mcp/commit/8194b320722abad00b4c30af00d5cc2c79714937))
+* report CDN/WAF blocks as edge_blocked, not a rejected credential (mcp-utils 2.9.0) ([#121](https://github.com/chrischall/kiaaccess-mcp/issues/121)) ([38f7cf2](https://github.com/chrischall/kiaaccess-mcp/commit/38f7cf27726ea50e0917112089ed4d71c69b19aa))
+* **session:** keep the saved Kia session consistent across server processes ([#127](https://github.com/chrischall/kiaaccess-mcp/issues/127)) ([4522b97](https://github.com/chrischall/kiaaccess-mcp/commit/4522b972f2d90b655cb083bcaf34b3ad1aef7de5))
+
 ## [1.1.2](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.1...v1.1.2) (2026-09-28)
 
 
