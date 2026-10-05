@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.3...v1.1.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** require @chrischall/mcp-utils 2.14.0 and MCP SDK 2.3.0 ([#129](https://github.com/chrischall/kiaaccess-mcp/issues/129)) ([b4edbb6](https://github.com/chrischall/kiaaccess-mcp/commit/b4edbb6773f8c30fb9e2e4d3aa363f0ffbfd7a16))
+
 ## [1.1.3](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.2...v1.1.3) (2026-10-03)
 
 
