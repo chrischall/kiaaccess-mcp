@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.5](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.4...v1.1.5) (2026-10-07)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv ([#133](https://github.com/chrischall/kiaaccess-mcp/issues/133)) ([4106a76](https://github.com/chrischall/kiaaccess-mcp/commit/4106a76f24d2ae628a6ecd839b4b7752c16f77c0))
+* **deps:** bump source-map-js ([#137](https://github.com/chrischall/kiaaccess-mcp/issues/137)) ([83e3552](https://github.com/chrischall/kiaaccess-mcp/commit/83e35527a59f842229d5de34737de6f4d71351e8))
+* **deps:** let remote-command confirmations be turned off for clients that never show the prompt ([#135](https://github.com/chrischall/kiaaccess-mcp/issues/135)) ([ddbe407](https://github.com/chrischall/kiaaccess-mcp/commit/ddbe407f8fca692ad970b2c6e8ff4cc8c31663eb))
+
+
+### Documentation
+
+* document MCP_CONFIRM_ELICITATION ([#138](https://github.com/chrischall/kiaaccess-mcp/issues/138)) ([83fc377](https://github.com/chrischall/kiaaccess-mcp/commit/83fc3771c55ee5da6438a92f36d952c0693d0c2a))
+
 ## [1.1.4](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.3...v1.1.4) (2026-10-05)
 
 
