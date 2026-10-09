@@ -18,6 +18,8 @@
  * import time; `tests/server-boot.test.ts` exercises it as a real process.)
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestHarness } from '@chrischall/mcp-utils/test';
 import type { KiaClient } from '../src/client.js';
@@ -192,6 +194,28 @@ describe('confirmation gating', () => {
       ]);
     } finally {
       await harness.close();
+    }
+  });
+});
+
+describe('manifest.json tools list', () => {
+  // The .mcpb manifest is what hosts and the mcp-host registry read to build a
+  // directory listing or an enabledTools allowlist without booting the server.
+  // It lists the FULL roster (KIA_WRITE_MODE=all): a tool that is gated off at
+  // registration is still part of what the package can serve.
+  const manifest = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../manifest.json', import.meta.url)), 'utf8'),
+  ) as { tools?: { name: string; description: string }[] };
+
+  it('declares every registered tool, and nothing else', async () => {
+    const declared = (manifest.tools ?? []).map((tool) => tool.name).sort();
+    expect(declared).toEqual(await rosterUnder('all'));
+  });
+
+  it('gives every declared tool a one-line description', () => {
+    for (const tool of manifest.tools ?? []) {
+      expect(tool.description.trim(), tool.name).not.toBe('');
+      expect(tool.description, tool.name).not.toMatch(/\n/);
     }
   });
 });
