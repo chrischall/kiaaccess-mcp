@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.5...v2.0.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* kia_export_refresh_token is gone. Sign in with the normal MFA tools (kia_start_login, kia_send_otp, kia_verify_otp) on each machine that runs the server. For a remote deployment that cannot read an OTP, bootstrap on a machine that can, then copy `rmtoken` from ~/.kiaaccess-mcp/session.json into KIA_RMTOKEN yourself (with the same KIA_DEVICE_ID), outside any conversation.
+* **commands:** kia_lock_doors, kia_unlock_doors, kia_start_climate, kia_stop_climate, kia_charge_targets, kia_start_charge, kia_stop_charge and kia_set_charge_limits no longer accept `vinKey`; pass `vehicle_key` instead. Their result/preview field `vinKey` is now `vehicleKey`. Confirm tokens minted before the upgrade no longer match (the bound subject names `vehicle_key`).
+
+### Features
+
+* **commands:** rename vinKey to vehicle_key on command and charging tools ([#141](https://github.com/chrischall/kiaaccess-mcp/issues/141)) ([cca1c5a](https://github.com/chrischall/kiaaccess-mcp/commit/cca1c5af3469190709fe7dd823347f8364c9281a))
+* remove kia_export_refresh_token ([#142](https://github.com/chrischall/kiaaccess-mcp/issues/142)) ([69f460c](https://github.com/chrischall/kiaaccess-mcp/commit/69f460cb3c566c4a250366d46c0997711792f336))
+
+
+### Bug Fixes
+
+* annotate tools truthfully and sync manifests with the served tools ([#144](https://github.com/chrischall/kiaaccess-mcp/issues/144)) ([e358ecd](https://github.com/chrischall/kiaaccess-mcp/commit/e358ecddfdf8c8941f5b27180c511298282a08ec))
+* declare the plugin MCP config under the mcpServers key Claude Code reads ([#145](https://github.com/chrischall/kiaaccess-mcp/issues/145)) ([ac5df48](https://github.com/chrischall/kiaaccess-mcp/commit/ac5df48c361f40e75b747c0865b41db2299222c1))
+* **deps:** update @chrischall/mcp-utils to 3.0.0 ([#143](https://github.com/chrischall/kiaaccess-mcp/issues/143)) ([e5057a4](https://github.com/chrischall/kiaaccess-mcp/commit/e5057a4173e7dfac0507425448894e41c521d1c6))
+* resolve low-severity audit findings ([#139](https://github.com/chrischall/kiaaccess-mcp/issues/139)) ([d8205ec](https://github.com/chrischall/kiaaccess-mcp/commit/d8205ec2ea4b2966553054c7670982ec24de750f))
+
 ## [1.1.5](https://github.com/chrischall/kiaaccess-mcp/compare/v1.1.4...v1.1.5) (2026-10-07)
 
 
