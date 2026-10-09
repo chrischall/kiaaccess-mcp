@@ -107,6 +107,8 @@ function confirmChargeCommand(
     body?: unknown;
     verification: string;
     confirmToken: string | undefined;
+    /** The tool's validated arguments, bound into the confirmation. */
+    input: Record<string, unknown>;
   },
 ): ReturnType<typeof confirmVehicleCommand> {
   // Widened to `CommandSpec` so the optional `note` is readable across the union.
@@ -118,6 +120,7 @@ function confirmChargeCommand(
     vehicleKey: args.vehicleKey,
     body: args.body,
     confirmToken: args.confirmToken,
+    args: args.input,
     preview: {
       action: args.action,
       command,
@@ -225,12 +228,14 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ vehicle_key: vehicleKey, chargeRatio, confirmToken }, ctx) => {
+    async (input, ctx) => {
+      const { vehicle_key: vehicleKey, chargeRatio, confirmToken } = input;
       const ratio = chargeRatio ?? 100;
       const gate = await confirmChargeCommand(ctx, 'charge', {
         tool: 'kia_start_charge',
         confirmAction: 'charge.start',
         confirmToken,
+        input,
         vehicleKey,
         action: `Start charging vehicle ${vehicleKey} to ${ratio}%`,
         body: { chargeRatio: ratio },
@@ -265,11 +270,13 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       }),
       inputSchema: z.object({ vehicle_key: schemaVehicleKey, confirmToken: confirmTokenParam }),
     },
-    async ({ vehicle_key: vehicleKey, confirmToken }, ctx) => {
+    async (input, ctx) => {
+      const { vehicle_key: vehicleKey, confirmToken } = input;
       const gate = await confirmChargeCommand(ctx, 'cancelCharge', {
         tool: 'kia_stop_charge',
         confirmAction: 'charge.stop',
         confirmToken,
+        input,
         vehicleKey,
         action: `Stop charging vehicle ${vehicleKey}`,
         verification: CONFIRM_VIA_STATUS,
@@ -318,7 +325,8 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ vehicle_key: vehicleKey, targets, verify, confirmToken }, ctx) => {
+    async (input, ctx) => {
+      const { vehicle_key: vehicleKey, targets, verify, confirmToken } = input;
       const duplicate = targets.find(
         (t, i) => targets.findIndex((o) => o.plugType === t.plugType) !== i,
       );
@@ -335,6 +343,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         tool: 'kia_set_charge_limits',
         confirmAction: 'charge.set_limits',
         confirmToken,
+        input,
         vehicleKey,
         action: `Set charge targets on vehicle ${vehicleKey} to ${targets.map((t) => `plug ${t.plugType} → ${t.targetSOClevel}%`).join(', ')}`,
         body: { targetSOClist: targets },

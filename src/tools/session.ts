@@ -134,6 +134,11 @@ function confirmSessionAction(
       message: options.message,
       details: preview,
       tool: options.tool,
+      // Single-account server: one KIA_USERNAME per process. The masked
+      // account is still bound through the preview payload.
+      account: undefined,
+      // Both session tools take no argument but confirmToken.
+      args: {},
       confirmToken: options.confirmToken,
       subject: () => ({ target: '', payload: preview, preview }),
     }),
