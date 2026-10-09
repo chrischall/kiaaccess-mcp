@@ -360,6 +360,8 @@ export class KiaClient {
   private credentials: KiaCredentials | undefined;
   private cachedDeviceId: string | undefined;
   private cachedRmToken: string | null | undefined;
+  /** The stored session exists but was minted for a different, explicitly configured device id. */
+  private storedDeviceMismatch = false;
   private cachedSids: SidManager | undefined;
   /**
    * A credential rejection from a `sid` mint, latched for the life of the
@@ -437,11 +439,13 @@ export class KiaClient {
   /** Non-throwing config snapshot for a healthcheck / diagnostics tool. */
   describeConfig(): { accountId: string | null; deviceId: string; configured: boolean; hasSession: boolean } {
     const configured = this.isConfigured();
+    // Session first: loading a stored session can adopt the device id it was minted against.
+    const hasSession = this.hasSession();
     return {
       accountId: configured ? this.accountId : null,
       deviceId: this.deviceId,
       configured,
-      hasSession: this.hasSession(),
+      hasSession,
     };
   }
 
@@ -449,14 +453,50 @@ export class KiaClient {
 
   private loadRmToken(): string | null {
     if (this.cachedRmToken === undefined) {
-      this.cachedRmToken =
-        this.opts.rmtoken ?? readEnvVar('KIA_RMTOKEN') ?? this.sessionIO.load(this.accountId)?.rmtoken ?? null;
+      this.storedDeviceMismatch = false;
+      this.cachedRmToken = this.opts.rmtoken ?? readEnvVar('KIA_RMTOKEN') ?? this.loadStoredRmToken();
     }
     return this.cachedRmToken;
   }
 
+  /**
+   * The stored `rmtoken`, only if it can work from this device. A token is
+   * bound to the device uuid it was minted against, so sending it with another
+   * one fails every refresh — and each failed refresh is a `prof/authUser`
+   * carrying the password. So: with no device id configured (the id file was
+   * lost or regenerated) adopt the one the token was minted against; with an
+   * explicit, different one, report no session and send nothing.
+   */
+  private loadStoredRmToken(): string | null {
+    const record = this.sessionIO.load(this.accountId);
+    if (record === null) return null;
+    const minted = record.deviceId;
+    // A record written before the deviceId field existed: nothing to compare.
+    if (!minted) return record.rmtoken;
+    const configured = this.opts.deviceId ?? readEnvVar('KIA_DEVICE_ID');
+    if (configured === undefined) {
+      this.cachedDeviceId = minted;
+      return record.rmtoken;
+    }
+    if (configured === minted) return record.rmtoken;
+    this.storedDeviceMismatch = true;
+    return null;
+  }
+
   private requireRmToken(): string {
     const rmtoken = this.loadRmToken();
+    if (!rmtoken && this.storedDeviceMismatch) {
+      throw new McpToolError(
+        'No Kia session for this device: the stored session was minted for a different device id than the ' +
+          'configured KIA_DEVICE_ID, and Kia rejects a remember-me token sent from another device. Nothing was ' +
+          'sent to Kia.',
+        {
+          hint:
+            'Set KIA_DEVICE_ID back to the value used during the bootstrap (or unset it to use the stored one), ' +
+            'or re-run the one-time MFA bootstrap for this device id.',
+        },
+      );
+    }
     if (!rmtoken) {
       throw new McpToolError(
         'No Kia session: this account has never completed the one-time MFA bootstrap on this device.',
