@@ -272,8 +272,12 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'kia_vehicle_status afterwards to see the refreshed values.',
       annotations: toolAnnotations({
         title: 'Refresh Kia vehicle status',
-        readOnly: true,
-        idempotent: true,
+        // Not read-only: hosts auto-approve readOnlyHint tools, and every call
+        // wakes the modem (12V drain, Kia rate-limits refreshes per day). It
+        // adds a reading rather than overwriting anything, so not destructive.
+        readOnly: false,
+        destructive: false,
+        idempotent: false,
         openWorld: true,
       }),
       inputSchema: z.object({ vehicle_key: vehicleKeyInput }),
