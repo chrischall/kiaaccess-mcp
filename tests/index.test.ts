@@ -50,7 +50,6 @@ async function rosterUnder(mode: string | undefined): Promise<string[]> {
 /** The tools that exist regardless of `KIA_WRITE_MODE`: account + read-only. */
 const READ_ONLY_ROSTER = [
   'kia_charge_targets',
-  'kia_export_refresh_token',
   'kia_forget_session',
   'kia_healthcheck',
   'kia_list_vehicles',
@@ -87,11 +86,10 @@ afterEach(() => {
 });
 
 describe('full tool surface', () => {
-  it('registers exactly 19 tools under KIA_WRITE_MODE=all', async () => {
+  it('registers exactly 18 tools under KIA_WRITE_MODE=all', async () => {
     const names = await rosterUnder('all');
     expect(names).toEqual([
       'kia_charge_targets',
-      'kia_export_refresh_token',
       'kia_forget_session',
       'kia_healthcheck',
       'kia_list_vehicles',
@@ -110,7 +108,15 @@ describe('full tool surface', () => {
       'kia_vehicle_status',
       'kia_verify_otp',
     ]);
-    expect(names).toHaveLength(19);
+    expect(names).toHaveLength(18);
+  });
+
+  it('never registers kia_export_refresh_token under any write mode', async () => {
+    // Removed (fleet-audit#858): it put a long-lived, MFA-bypassing credential
+    // into the transcript. Nothing may bring it back, whatever the mode.
+    for (const mode of [undefined, 'none', 'comfort', 'all']) {
+      expect(await rosterUnder(mode)).not.toContain('kia_export_refresh_token');
+    }
   });
 
   it('namespaces every tool under `kia_`', async () => {
@@ -162,7 +168,7 @@ describe('KIA_WRITE_MODE gating', () => {
 });
 
 describe('confirmation gating', () => {
-  it('gates exactly the tools that act on the car or emit a credential', async () => {
+  it('gates exactly the tools that act on the car or the stored session', async () => {
     process.env.KIA_WRITE_MODE = 'all';
     const harness = await createTestHarness(async (server) => {
       for (const register of TOOL_REGISTRARS) await register(server, stubClient);
@@ -182,7 +188,6 @@ describe('confirmation gating', () => {
         expect(Object.keys(tool.inputSchema.properties ?? {}), tool.name).not.toContain('confirm');
       }
       expect(gated).toEqual([
-        'kia_export_refresh_token',
         'kia_forget_session',
         'kia_lock_doors',
         'kia_set_charge_limits',

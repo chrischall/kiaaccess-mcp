@@ -29,7 +29,6 @@ type Stub = {
   beginLogin: ReturnType<typeof vi.fn>;
   sendLoginOtp: ReturnType<typeof vi.fn>;
   completeLogin: ReturnType<typeof vi.fn>;
-  exportRmToken: ReturnType<typeof vi.fn>;
   forgetSession: ReturnType<typeof vi.fn>;
 };
 
@@ -58,7 +57,6 @@ function makeStub(): Stub {
       expiresIn: OTP_EXPIRES_AT_MS as number | undefined,
     })),
     completeLogin: vi.fn(async () => ({ accountId: ACCOUNT, deviceId: DEVICE_ID, persisted: true })),
-    exportRmToken: vi.fn(() => RMTOKEN as string | null),
     forgetSession: vi.fn(() => undefined),
   };
   // The real client stops reporting a session once it has been forgotten;
@@ -103,11 +101,10 @@ afterEach(async () => {
 // --- registration -----------------------------------------------------------
 
 describe('registerSessionTools', () => {
-  it('registers exactly the six account tools', async () => {
+  it('registers exactly the five account tools', async () => {
     await mount();
     const names = (await harness.listTools()).map((t) => t.name).sort();
     expect(names).toEqual([
-      'kia_export_refresh_token',
       'kia_forget_session',
       'kia_send_otp',
       'kia_session_status',
@@ -120,7 +117,6 @@ describe('registerSessionTools', () => {
     await mount();
     expect(stub.describeConfig).not.toHaveBeenCalled();
     expect(stub.beginLogin).not.toHaveBeenCalled();
-    expect(stub.exportRmToken).not.toHaveBeenCalled();
     expect(stub.forgetSession).not.toHaveBeenCalled();
   });
 });
@@ -328,73 +324,6 @@ describe('kia_verify_otp', () => {
     const result = await harness.callTool('kia_verify_otp', { otpKey: OTP_KEY, xid: XID, otp: 'abcdef' });
     expect(result.isError).toBe(true);
     expect(stub.completeLogin).not.toHaveBeenCalled();
-  });
-});
-
-// --- kia_export_refresh_token ----------------------------------------------
-
-describe('kia_export_refresh_token', () => {
-  it('returns NO token on phase 1 and does not read it', async () => {
-    await mount();
-    const phaseOne = await requestConfirmation(harness, 'kia_export_refresh_token');
-    const data = phaseOne.preview;
-    expect(JSON.stringify(phaseOne)).not.toContain(RMTOKEN);
-    expect(String(data.warning)).toMatch(/credential/i);
-    expect(stub.exportRmToken).not.toHaveBeenCalled();
-  });
-
-  it('previews without naming an account when nothing is configured', async () => {
-    stub.describeConfig.mockReturnValue({
-      accountId: null,
-      deviceId: DEVICE_ID,
-      configured: false,
-      hasSession: false,
-    });
-    await mount();
-    const data = await previewOf(harness, 'kia_export_refresh_token');
-    expect(data.account).toBeNull();
-    expect(data.hasSession).toBe(false);
-    expect(String(data.action)).toContain('the configured account');
-    expect(stub.exportRmToken).not.toHaveBeenCalled();
-  });
-
-  it('returns the token once confirmed, labelled as a credential', async () => {
-    await mount();
-    const result = await callConfirmed(harness, 'kia_export_refresh_token');
-    expect(result.isError).toBeFalsy();
-    const data = parseToolResult<Record<string, unknown>>(result);
-    expect(data.rmtoken).toBe(RMTOKEN);
-    expect(stub.exportRmToken).toHaveBeenCalledTimes(1);
-    expect(data.account).toBe(MASKED_ACCOUNT);
-    expect(String(data.warning)).toMatch(/bypass/i);
-  });
-
-  it('explains the missing bootstrap when the account has no stored token', async () => {
-    stub.exportRmToken.mockReturnValue(null);
-    stub.describeConfig.mockReturnValue({
-      accountId: ACCOUNT,
-      deviceId: DEVICE_ID,
-      configured: true,
-      hasSession: false,
-    });
-    await mount();
-    const result = await callConfirmed(harness, 'kia_export_refresh_token');
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain('kia_start_login');
-  });
-
-  it('explains the missing configuration when no credentials are set', async () => {
-    stub.exportRmToken.mockReturnValue(null);
-    stub.describeConfig.mockReturnValue({
-      accountId: null,
-      deviceId: DEVICE_ID,
-      configured: false,
-      hasSession: false,
-    });
-    await mount();
-    const result = await callConfirmed(harness, 'kia_export_refresh_token');
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain('KIA_USERNAME');
   });
 });
 

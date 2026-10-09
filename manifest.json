@@ -47,10 +47,6 @@
       "description": "Discard the stored Kia session so login can be re-run (local only, confirmation-gated)"
     },
     {
-      "name": "kia_export_refresh_token",
-      "description": "Export the stored Kia refresh token in plaintext for KIA_RMTOKEN (confirmation-gated)"
-    },
-    {
       "name": "kia_list_vehicles",
       "description": "List enrolled Kia vehicles with their vehicle keys, nicknames, models and mileage"
     },

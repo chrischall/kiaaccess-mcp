@@ -36,7 +36,7 @@ const BIN = join(ROOT, 'dist', 'index.js');
  * serves its tools". The value is the full `KIA_WRITE_MODE=all` surface, so
  * dropping a registrar still fails here.
  */
-const MIN_TOOLS = 17;
+const MIN_TOOLS = 18;
 
 beforeAll(() => {
   if (!existsSync(BUNDLE) || !existsSync(BIN)) {

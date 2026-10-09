@@ -13,8 +13,9 @@ env:
       The long-lived remember-me token — this is the MFA bypass, and the right
       credential for a hosted deployment (nowhere to read an OTP). Bootstrap it
       locally with the kia_start_login / kia_send_otp / kia_verify_otp tools,
-      then export it with kia_export_refresh_token. Takes precedence over the
-      saved session and over username/password.
+      then copy rmtoken out of ~/.kiaaccess-mcp/session.json by hand (no tool
+      returns it). Takes precedence over the saved session and over
+      username/password.
   - name: KIA_USERNAME
     required: false
     help: >-

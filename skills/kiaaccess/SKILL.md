@@ -43,7 +43,7 @@ Kia challenges each new device once. Start with `kia_session_status`; if it repo
 
 The remember-me token is then stored locally and refreshes sessions silently forever; MFA is never needed again on that machine. `kia_forget_session` (confirmation-gated) throws it away so the bootstrap can be repeated.
 
-A server with no one to read an OTP cannot run these steps at all. Bootstrap it elsewhere and pass the exported token as `KIA_RMTOKEN`, with `KIA_DEVICE_ID` set to the same uuid on both machines — the token is minted against a device uuid and is worthless with a different one. `KIA_RMTOKEN` wins over the local store.
+A server with no one to read an OTP cannot run these steps at all. Bootstrap it elsewhere and have the user copy the `rmtoken` from that machine's `~/.kiaaccess-mcp/session.json` into `KIA_RMTOKEN` themselves (no tool returns it, and it must never pass through the conversation), with `KIA_DEVICE_ID` set to the same uuid on both machines — the token is minted against a device uuid and is worthless with a different one. `KIA_RMTOKEN` wins over the local store.
 
 **If a login is rejected, STOP.** Kia counts failed logins and eventually enforces reCAPTCHA, which breaks server-side login for that account permanently. Tell the user to check the credentials in the Kia Access app and fix the environment — never retry with a guessed password.
 
@@ -55,7 +55,6 @@ A server with no one to read an OTP cannot run these steps at all. Bootstrap it 
 | `kia_session_status` | Configured? Bootstrapped? Which write mode? No network call, no secrets. Start here when a tool says it is not configured. |
 | `kia_start_login` / `kia_send_otp` / `kia_verify_otp` | The three bootstrap steps above. |
 | `kia_forget_session(confirmToken?)` | Deletes the locally stored session. Local only — Kia is not contacted. |
-| `kia_export_refresh_token(confirmToken?)` | Returns the `rmtoken` in plaintext — a full MFA bypass. Only for moving a locally-bootstrapped session into a deployment that cannot bootstrap itself, via `KIA_RMTOKEN`. Never call it to "check the session"; use `kia_session_status`. |
 
 ### Reads
 | Tool | Notes |
@@ -77,7 +76,7 @@ A server with no one to read an OTP cannot run these steps at all. Bootstrap it 
 
 ## Confirmations
 
-Every write — each command, plus `kia_start_login`, `kia_forget_session` and `kia_export_refresh_token` — asks the user first. A client that can show a confirmation prompt shows one and the tool proceeds on approval (unless the server sets `MCP_CONFIRM_ELICITATION=off`). Otherwise the first call does nothing and returns `status: "confirmation-required"` with a `preview` and a `confirmToken`; show the user the preview, get their approval in chat (under the default `MCP_CONFIRM_MODE=ask-user`), then call the SAME tool again with the SAME arguments plus `confirmToken`. The token works once (`TOKEN_REUSED` after that), expires after `MCP_CONFIRM_TTL_SECONDS` (default 600), and is bound to the exact request: changing anything that would be sent returns `DRAFT_CHANGED` with a fresh preview and token. Under `MCP_CONFIRM_MODE=refuse` such clients get `reason: "confirmation-unsupported"` and nothing is sent.
+Every write — each command, plus `kia_start_login` and `kia_forget_session` — asks the user first. A client that can show a confirmation prompt shows one and the tool proceeds on approval (unless the server sets `MCP_CONFIRM_ELICITATION=off`). Otherwise the first call does nothing and returns `status: "confirmation-required"` with a `preview` and a `confirmToken`; show the user the preview, get their approval in chat (under the default `MCP_CONFIRM_MODE=ask-user`), then call the SAME tool again with the SAME arguments plus `confirmToken`. The token works once (`TOKEN_REUSED` after that), expires after `MCP_CONFIRM_TTL_SECONDS` (default 600), and is bound to the exact request: changing anything that would be sent returns `DRAFT_CHANGED` with a fresh preview and token. Under `MCP_CONFIRM_MODE=refuse` such clients get `reason: "confirmation-unsupported"` and nothing is sent.
 
 ## Reading a command result
 

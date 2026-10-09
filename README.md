@@ -96,7 +96,7 @@ To start over (revoked token, changed password, handing the machine on), run **`
 The bootstrap needs a human once. A deployment that has no one to read an OTP — a remote host — cannot run it at all, so bootstrap on a machine that can and move the token:
 
 1. Set `KIA_DEVICE_ID` to a fixed uuid **before** the bootstrap, on both machines. The `rmtoken` is minted against a device uuid and is worthless with a different one, and `kia_session_status` only ever reports a truncated prefix — so if you let it be generated, you cannot read back the value you need.
-2. Bootstrap as above, then run `kia_export_refresh_token` and confirm it.
+2. Bootstrap as above, then copy the `rmtoken` value out of `~/.kiaaccess-mcp/session.json` yourself, in a terminal. No tool returns it: the token is a long-lived MFA bypass, so it is never put into a conversation.
 3. Give the remote deployment that value as `KIA_RMTOKEN`, alongside `KIA_USERNAME`, `KIA_PASSWORD` and the same `KIA_DEVICE_ID`.
 
 `KIA_RMTOKEN` takes precedence over anything in the local session store, so the deployment's session is whatever you handed it rather than whatever it last wrote. Treat the value like the password it stands in for: it bypasses MFA, and with the account password it grants full control of the vehicle.
@@ -124,7 +124,7 @@ Two more rules hold for every command:
 
 ## Confirmations
 
-Every write tool (the commands above, plus `kia_start_login`, `kia_forget_session` and `kia_export_refresh_token`) asks you to confirm before it acts. A client that can show a confirmation prompt (Claude Code) shows one, with the exact request. A client that cannot (claude.ai, Claude Desktop) gets a two-step flow instead: the first call does nothing and returns a preview plus a `confirmToken`, and only a repeat call carrying that token proceeds. The token is bound to the exact request previewed — change an argument and it is refused (`DRAFT_CHANGED`) with a fresh preview; use it twice and the second call is refused (`TOKEN_REUSED`).
+Every write tool (the commands above, plus `kia_start_login` and `kia_forget_session`) asks you to confirm before it acts. A client that can show a confirmation prompt (Claude Code) shows one, with the exact request. A client that cannot (claude.ai, Claude Desktop) gets a two-step flow instead: the first call does nothing and returns a preview plus a `confirmToken`, and only a repeat call carrying that token proceeds. The token is bound to the exact request previewed — change an argument and it is refused (`DRAFT_CHANGED`) with a fresh preview; use it twice and the second call is refused (`TOKEN_REUSED`).
 
 | variable | default | |
 |---|---|---|
@@ -145,7 +145,6 @@ Every write tool (the commands above, plus `kia_start_login`, `kia_forget_sessio
 | `kia_send_otp` | Step 2 — delivers the passcode by `SMS` or `EMAIL`. |
 | `kia_verify_otp` | Step 3 — exchanges the passcode for a stored session. Returns no secret. |
 | `kia_forget_session` | Discards the stored token so the bootstrap can be re-run. Local only; confirmation-gated. |
-| `kia_export_refresh_token` | Returns the `rmtoken` **in plaintext** — a full MFA bypass. Exists only to move a locally-bootstrapped session into a deployment that cannot run the bootstrap itself, via `KIA_RMTOKEN`. Confirmation-gated. |
 
 ### Reads
 
