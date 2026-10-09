@@ -41,7 +41,10 @@ import { VehicleKey } from './vehicle-key.js';
 // ---------------------------------------------------------------------------
 
 /** The vehicle key (`vehicleKey` from the vehicle list), sent as the `vinkey` header. */
-const schemaVinKey = VehicleKey.describe('Vehicle key (the `vehicleKey` from the vehicle-list tool). Not the VIN.');
+const schemaVehicleKey = VehicleKey.describe(
+  'Vehicle key (the `vehicleKey` from the vehicle-list tool). Not the VIN. ' +
+    'Required: charging tools never default to the only vehicle.',
+);
 
 /**
  * Lower bound on a target state of charge. Kia's own app offers 50–100% in 10%
@@ -99,7 +102,7 @@ function confirmChargeCommand(
     tool: string;
     /** `<service>.<verb>`, e.g. `charge.start`. */
     confirmAction: string;
-    vinKey: string;
+    vehicleKey: string;
     action: string;
     body?: unknown;
     verification: string;
@@ -112,7 +115,7 @@ function confirmChargeCommand(
     tool: args.tool,
     action: args.confirmAction,
     command,
-    vinKey: args.vinKey,
+    vehicleKey: args.vehicleKey,
     body: args.body,
     confirmToken: args.confirmToken,
     preview: {
@@ -121,7 +124,7 @@ function confirmChargeCommand(
       method: spec.method,
       endpoint: spec.path,
       url: `${BASE_URL}${spec.path}`,
-      vinKey: args.vinKey,
+      vehicleKey: args.vehicleKey,
       // Dropped from the JSON when the command has no body (a GET).
       willSend: args.body,
       endpointVerified: spec.verified,
@@ -179,12 +182,12 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         title: 'Kia EV charge targets',
         openWorld: true,
       }),
-      inputSchema: z.object({ vinKey: schemaVinKey }),
+      inputSchema: z.object({ vehicle_key: schemaVehicleKey }),
     },
-    async ({ vinKey }) => {
-      const targets = await client.getChargeTargets(vinKey);
+    async ({ vehicle_key: vehicleKey }) => {
+      const targets = await client.getChargeTargets(vehicleKey);
       return minifiedResult({
-        vinKey,
+        vehicleKey,
         endpoint: ENDPOINTS.chargeTargets,
         targets,
         note: 'targetSOClevel is a percentage. Which plugType is AC and which is DC is not documented by Kia.',
@@ -211,7 +214,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         destructive: false,
       }),
       inputSchema: z.object({
-        vinKey: schemaVinKey,
+        vehicle_key: schemaVehicleKey,
         chargeRatio: z
           .number()
           .int()
@@ -222,20 +225,20 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ vinKey, chargeRatio, confirmToken }, ctx) => {
+    async ({ vehicle_key: vehicleKey, chargeRatio, confirmToken }, ctx) => {
       const ratio = chargeRatio ?? 100;
       const gate = await confirmChargeCommand(ctx, 'charge', {
         tool: 'kia_start_charge',
         confirmAction: 'charge.start',
         confirmToken,
-        vinKey,
-        action: `Start charging vehicle ${vinKey} to ${ratio}%`,
+        vehicleKey,
+        action: `Start charging vehicle ${vehicleKey} to ${ratio}%`,
         body: { chargeRatio: ratio },
         verification: CONFIRM_VIA_STATUS,
       });
       if (gate) return gate;
 
-      const result = await client.startCharge(vinKey, ratio);
+      const result = await client.startCharge(vehicleKey, ratio);
       return minifiedResult({
         ...describeCommand(result),
         chargeRatio: ratio,
@@ -260,20 +263,20 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         openWorld: true,
         destructive: false,
       }),
-      inputSchema: z.object({ vinKey: schemaVinKey, confirmToken: confirmTokenParam }),
+      inputSchema: z.object({ vehicle_key: schemaVehicleKey, confirmToken: confirmTokenParam }),
     },
-    async ({ vinKey, confirmToken }, ctx) => {
+    async ({ vehicle_key: vehicleKey, confirmToken }, ctx) => {
       const gate = await confirmChargeCommand(ctx, 'cancelCharge', {
         tool: 'kia_stop_charge',
         confirmAction: 'charge.stop',
         confirmToken,
-        vinKey,
-        action: `Stop charging vehicle ${vinKey}`,
+        vehicleKey,
+        action: `Stop charging vehicle ${vehicleKey}`,
         verification: CONFIRM_VIA_STATUS,
       });
       if (gate) return gate;
 
-      const result = await client.cancelCharge(vinKey);
+      const result = await client.cancelCharge(vehicleKey);
       return minifiedResult({
         ...describeCommand(result),
         verification: { attempted: false, reason: CONFIRM_VIA_STATUS },
@@ -300,7 +303,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         destructive: false,
       }),
       inputSchema: z.object({
-        vinKey: schemaVinKey,
+        vehicle_key: schemaVehicleKey,
         targets: z
           .array(schemaChargeTarget)
           .min(1)
@@ -315,7 +318,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         confirmToken: confirmTokenParam,
       }),
     },
-    async ({ vinKey, targets, verify, confirmToken }, ctx) => {
+    async ({ vehicle_key: vehicleKey, targets, verify, confirmToken }, ctx) => {
       const duplicate = targets.find(
         (t, i) => targets.findIndex((o) => o.plugType === t.plugType) !== i,
       );
@@ -332,8 +335,8 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         tool: 'kia_set_charge_limits',
         confirmAction: 'charge.set_limits',
         confirmToken,
-        vinKey,
-        action: `Set charge targets on vehicle ${vinKey} to ${targets.map((t) => `plug ${t.plugType} → ${t.targetSOClevel}%`).join(', ')}`,
+        vehicleKey,
+        action: `Set charge targets on vehicle ${vehicleKey} to ${targets.map((t) => `plug ${t.plugType} → ${t.targetSOClevel}%`).join(', ')}`,
         body: { targetSOClist: targets },
         verification:
           'After the write, evc/gts is re-read and the targets compared (unless verify:false).',
@@ -341,7 +344,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       if (gate) return gate;
 
       if (verify === false) {
-        const unchecked = await client.setChargeTargets(vinKey, targets);
+        const unchecked = await client.setChargeTargets(vehicleKey, targets);
         return minifiedResult({
           ...describeCommand(unchecked),
           requested: targets,
@@ -354,10 +357,10 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       }
 
       // Baseline BEFORE the write, so the change diff means something.
-      const baseline = await client.getChargeTargets(vinKey);
-      const result = await client.setChargeTargets(vinKey, targets);
+      const baseline = await client.getChargeTargets(vehicleKey);
+      const result = await client.setChargeTargets(vehicleKey, targets);
       const check = await client.verifyCommand<KiaChargeTarget[]>(
-        () => client.getChargeTargets(vinKey),
+        () => client.getChargeTargets(vehicleKey),
         (snapshot) =>
           targets.every((t) =>
             snapshot.some(

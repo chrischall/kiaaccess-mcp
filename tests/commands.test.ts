@@ -242,13 +242,13 @@ describe('confirmation gate', () => {
   ])('%s phase 1 makes NO call and previews the request with a token', async (name, method, path) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    const { preview, action } = await requestConfirmation(harness, name, { vinKey: VIN_KEY });
+    const { preview, action } = await requestConfirmation(harness, name, { vehicle_key: VIN_KEY });
 
     expect(action).toMatch(/^(vehicle|climate)\./);
     expect(preview.method).toBe(method);
     expect(preview.path).toBe(path);
     expect(preview.url).toBe(`https://api.owners.kia.com/apigw/v1/${path}`);
-    expect(preview.vinKey).toBe(VIN_KEY);
+    expect(preview.vehicleKey).toBe(VIN_KEY);
     expect(preview.endpointVerified).toBe(true);
     expect(preview.proof).toBeDefined();
     expect(String(preview.note)).toMatch(/not been touched/);
@@ -264,7 +264,7 @@ describe('confirmation gate', () => {
   ] as const)('%s phase 2 with the returned token sends the command exactly once', async (name, method) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    const result = await callConfirmed(harness, name, { vinKey: VIN_KEY });
+    const result = await callConfirmed(harness, name, { vehicle_key: VIN_KEY });
     expect(result.isError).toBeFalsy();
     expect(parseToolResult<{ commandSent: boolean }>(result).commandSent).toBe(true);
     expect(spies[method]).toHaveBeenCalledTimes(1);
@@ -288,11 +288,11 @@ describe('confirmation gate', () => {
   it('refuses a replayed token as TOKEN_REUSED and does not send again', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    const { confirmToken } = await requestConfirmation(harness, 'kia_lock_doors', { vinKey: VIN_KEY });
-    await harness.callTool('kia_lock_doors', { vinKey: VIN_KEY, confirmToken });
+    const { confirmToken } = await requestConfirmation(harness, 'kia_lock_doors', { vehicle_key: VIN_KEY });
+    await harness.callTool('kia_lock_doors', { vehicle_key: VIN_KEY, confirmToken });
     expect(spies.lockDoors).toHaveBeenCalledTimes(1);
 
-    const replay = await harness.callTool('kia_lock_doors', { vinKey: VIN_KEY, confirmToken });
+    const replay = await harness.callTool('kia_lock_doors', { vehicle_key: VIN_KEY, confirmToken });
     expect(replay.isError).toBe(true);
     expect(parseToolResult<{ error: string }>(replay).error).toBe('TOKEN_REUSED');
     expect(spies.lockDoors).toHaveBeenCalledTimes(1);
@@ -303,11 +303,11 @@ describe('confirmation gate', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     const { confirmToken } = await requestConfirmation(harness, 'kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 68,
     });
     const changed = await harness.callTool('kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 80,
       confirmToken,
     });
@@ -325,7 +325,7 @@ describe('confirmation gate', () => {
     const harness = await createTestHarness((server) => registerCommandsTools(server, client), {
       elicitation: async () => ({ action: 'accept', content: { confirmed: true } }),
     });
-    const result = await harness.callTool('kia_lock_doors', { vinKey: VIN_KEY });
+    const result = await harness.callTool('kia_lock_doors', { vehicle_key: VIN_KEY });
     expect(result.isError).toBeFalsy();
     expect(parseToolResult<{ commandSent: boolean }>(result).commandSent).toBe(true);
     expect(spies.lockDoors).toHaveBeenCalledTimes(1);
@@ -337,7 +337,7 @@ describe('confirmation gate', () => {
     const harness = await createTestHarness((server) => registerCommandsTools(server, client), {
       elicitation: async () => ({ action: 'decline' }),
     });
-    await harness.callTool('kia_unlock_doors', { vinKey: VIN_KEY });
+    await harness.callTool('kia_unlock_doors', { vehicle_key: VIN_KEY });
     expectNoCalls(spies);
     await harness.close();
   });
@@ -346,7 +346,7 @@ describe('confirmation gate', () => {
     process.env.MCP_CONFIRM_MODE = 'refuse';
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    const result = await harness.callTool('kia_lock_doors', { vinKey: VIN_KEY });
+    const result = await harness.callTool('kia_lock_doors', { vehicle_key: VIN_KEY });
     const body = parseToolResult<{ reason: string; dispatched: boolean }>(result);
     expect(body.reason).toBe('confirmation-unsupported');
     expect(body.dispatched).toBe(false);
@@ -359,7 +359,7 @@ describe('confirmation gate', () => {
     const harness = await harnessFor(client);
 
     const numeric = (await previewOf(harness, 'kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 68,
       durationMinutes: 10,
       defrost: true,
@@ -374,7 +374,7 @@ describe('confirmation gate', () => {
     expect(numeric.willSend.remoteClimate).not.toHaveProperty('heatVentSeat');
 
     const low = (await previewOf(harness, 'kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 'LOW',
     })) as { willSend: { remoteClimate: { airTemp: { value: string } } } };
     expect(low.willSend.remoteClimate.airTemp.value).toBe('LOW');
@@ -386,7 +386,7 @@ describe('confirmation gate', () => {
   it('omits a body from the preview for GET commands', async () => {
     const { client } = makeClient();
     const harness = await harnessFor(client);
-    const payload = await previewOf(harness, 'kia_stop_climate', { vinKey: VIN_KEY });
+    const payload = await previewOf(harness, 'kia_stop_climate', { vehicle_key: VIN_KEY });
     expect(payload).not.toHaveProperty('willSend');
     await harness.close();
   });
@@ -395,7 +395,7 @@ describe('confirmation gate', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     const result = await harness.callTool('kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 55,
     });
     expect(result.isError).toBe(true);
@@ -416,7 +416,7 @@ describe('confirmation gate', () => {
 
     for (const sent of ['72', '62', '82']) {
       const preview = (await previewOf(harness, 'kia_start_climate', {
-        vinKey: VIN_KEY,
+        vehicle_key: VIN_KEY,
         temperature: sent,
       })) as { willSend: { remoteClimate: { airTemp: { value: string } } }; action: string };
       expect(preview.willSend.remoteClimate.airTemp.value).toBe(sent);
@@ -433,7 +433,7 @@ describe('confirmation gate', () => {
     const harness = await harnessFor(client);
     for (const sent of ['55', '99', '72.5', 'warm', '']) {
       const result = await harness.callTool('kia_start_climate', {
-        vinKey: VIN_KEY,
+        vehicle_key: VIN_KEY,
         temperature: sent,
       });
       expect(result.isError, `temperature ${JSON.stringify(sent)} must be rejected`).toBe(true);
@@ -478,7 +478,7 @@ describe('confirmed execution', () => {
 
     const payload = parseToolResult<Record<string, unknown>>(
       await callConfirmed(harness, 'kia_lock_doors', {
-        vinKey: VIN_KEY,
+        vehicle_key: VIN_KEY,
       }),
     );
 
@@ -510,7 +510,7 @@ describe('confirmed execution', () => {
     const harness = await harnessFor(client);
 
     const payload = parseToolResult<Record<string, unknown>>(
-      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+      await callConfirmed(harness, 'kia_lock_doors', { vehicle_key: VIN_KEY }),
     );
 
     expect(payload.commandAccepted).toBe(true);
@@ -526,7 +526,7 @@ describe('confirmed execution', () => {
     const harness = await harnessFor(client);
 
     const payload = parseToolResult<Record<string, unknown>>(
-      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+      await callConfirmed(harness, 'kia_lock_doors', { vehicle_key: VIN_KEY }),
     );
 
     expect(payload.alreadyInState).toBe(false);
@@ -538,7 +538,7 @@ describe('confirmed execution', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await callConfirmed(harness, 'kia_lock_doors', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
     });
 
     expect(spies.getVehicleStatus).toHaveBeenCalledWith(VIN_KEY, {
@@ -571,7 +571,7 @@ describe('confirmed execution', () => {
       verification({ verified: false, attempts: 7, snapshot: { doorLock: true }, changedFields: [] }),
     );
     const harness = await harnessFor(client);
-    const result = await callConfirmed(harness, 'kia_unlock_doors', { vinKey: VIN_KEY, });
+    const result = await callConfirmed(harness, 'kia_unlock_doors', { vehicle_key: VIN_KEY, });
     const payload = parseToolResult<Record<string, unknown>>(result);
 
     expect(payload.commandSent).toBe(true);
@@ -587,7 +587,7 @@ describe('confirmed execution', () => {
     );
     const harness = await harnessFor(client);
     const payload = parseToolResult<Record<string, unknown>>(
-      await callConfirmed(harness, 'kia_unlock_doors', { vinKey: VIN_KEY, }),
+      await callConfirmed(harness, 'kia_unlock_doors', { vehicle_key: VIN_KEY, }),
     );
     expect(String(payload.note)).toContain('verification was cancelled');
     await harness.close();
@@ -609,7 +609,7 @@ describe('confirmed execution', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await callConfirmed(harness, 'kia_lock_doors', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
     });
 
     const readFn = spies.verifyCommand.mock.calls[0]?.[0] as () => Promise<KiaVehicleStatus | null>;
@@ -627,7 +627,7 @@ describe('confirmed execution', () => {
   ])('%s gates on doorLock === %s and nothing else', async (name, want) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await callConfirmed(harness, name, { vinKey: VIN_KEY, });
+    await callConfirmed(harness, name, { vehicle_key: VIN_KEY, });
 
     const predicate = spies.verifyCommand.mock.calls[0]?.[1] as (
       s: KiaVehicleStatus | null,
@@ -645,7 +645,7 @@ describe('confirmed execution', () => {
   ])('%s gates on the NESTED climate.airCtrl === %s', async (name, want) => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
-    await callConfirmed(harness, name, { vinKey: VIN_KEY, });
+    await callConfirmed(harness, name, { vehicle_key: VIN_KEY, });
 
     const predicate = spies.verifyCommand.mock.calls[0]?.[1] as (
       s: KiaVehicleStatus | null,
@@ -666,7 +666,7 @@ describe('confirmed execution', () => {
     const harness = await harnessFor(client);
     const payload = parseToolResult<Record<string, unknown>>(
       await callConfirmed(harness, 'kia_start_climate', {
-        vinKey: VIN_KEY,
+        vehicle_key: VIN_KEY,
       }),
     );
     expect(payload.expected).toEqual({ 'climate.airCtrl': true });
@@ -678,7 +678,7 @@ describe('confirmed execution', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await callConfirmed(harness, 'kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 72,
       durationMinutes: 15,
       defrost: true,
@@ -695,7 +695,7 @@ describe('confirmed execution', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await callConfirmed(harness, 'kia_start_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       temperature: 'HIGH',
     });
     expect(spies.startClimate.mock.calls[0]?.[1]).toMatchObject({
@@ -716,7 +716,7 @@ describe('confirmed execution', () => {
     );
     const harness = await harnessFor(client);
     const result = await callConfirmed(harness, 'kia_unlock_doors', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
     });
     const payload = parseToolResult<Record<string, unknown>>(result);
 
@@ -732,13 +732,13 @@ describe('confirmed execution', () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
     await callConfirmed(harness, 'kia_stop_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       waitSeconds: 0,
     });
     expect((spies.verifyCommand.mock.calls[0]?.[2] as { timeoutMs: number }).timeoutMs).toBe(0);
 
     await callConfirmed(harness, 'kia_stop_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       waitSeconds: 30,
     });
     expect((spies.verifyCommand.mock.calls[1]?.[2] as { timeoutMs: number }).timeoutMs).toBe(
@@ -752,7 +752,7 @@ describe('confirmed execution', () => {
     spies.getVehicleStatus.mockResolvedValue(null);
     const harness = await harnessFor(client);
     const result = await callConfirmed(harness, 'kia_lock_doors', {
-      vinKey: 'FAKE-UNKNOWN-KEY',
+      vehicle_key: 'FAKE-UNKNOWN-KEY',
     });
 
     expect(result.isError).toBe(true);
@@ -767,7 +767,7 @@ describe('confirmed execution', () => {
     spies.stopClimate.mockRejectedValue(new Error('Kia API error on rems/stop: boom'));
     const harness = await harnessFor(client);
     const result = await callConfirmed(harness, 'kia_stop_climate', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
     });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('rems/stop');
@@ -817,7 +817,7 @@ function abortError(): Error {
 async function confirmedLock(client: KiaCommandsClient): Promise<() => Promise<CallToolResult>> {
   const handler = captureHandlers(client).get('kia_lock_doors');
   if (handler === undefined) throw new Error('kia_lock_doors not registered');
-  const args = { vinKey: VIN_KEY, waitSeconds: 30 };
+  const args = { vehicle_key: VIN_KEY, waitSeconds: 30 };
   const phaseOne = parseToolResult<{ confirmToken: string }>(await handler(args, NO_ELICITATION_CTX));
   return () => handler({ ...args, confirmToken: phaseOne.confirmToken }, NO_ELICITATION_CTX);
 }
@@ -888,7 +888,7 @@ describe('cancellation outside the poll loop', () => {
     spies.lockDoors.mockRejectedValue(new KiaRequestTimeoutError('GET', 'rems/door/lock', 30_000));
     const harness = await harnessFor(client);
     const payload = parseToolResult<Record<string, unknown>>(
-      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+      await callConfirmed(harness, 'kia_lock_doors', { vehicle_key: VIN_KEY }),
     );
 
     expect(payload.timedOut).toBe(true);
@@ -907,7 +907,7 @@ describe('cancellation outside the poll loop', () => {
     spies.verifyCommand.mockRejectedValue(new KiaRequestTimeoutError('POST', 'cmm/gvi', 30_000));
     const harness = await harnessFor(client);
     const payload = parseToolResult<Record<string, unknown>>(
-      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+      await callConfirmed(harness, 'kia_lock_doors', { vehicle_key: VIN_KEY }),
     );
 
     expect(payload.commandSent).toBe(true);

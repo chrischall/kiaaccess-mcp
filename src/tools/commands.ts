@@ -99,8 +99,9 @@ export function getKiaWriteMode(): KiaWriteMode {
 // Shared argument atoms
 // ---------------------------------------------------------------------------
 
-const vinKeyArg = VehicleKey.describe(
-  'The vehicle key (`vehicleKey` from the vehicle-list tool), used as the `vinkey` header. Not the VIN.',
+const vehicleKeyArg = VehicleKey.describe(
+  'The vehicle key (`vehicleKey` from the vehicle-list tool), used as the `vinkey` header. Not the VIN. ' +
+    'Required: commands never default to the only vehicle, so every request names the car it acts on.',
 );
 
 const waitSecondsArg = z
@@ -119,7 +120,7 @@ const waitSecondsArg = z
 
 /** Every command tool takes the same three arguments plus its own options. */
 const baseArgs = z.object({
-  vinKey: vinKeyArg,
+  vehicle_key: vehicleKeyArg,
   waitSeconds: waitSecondsArg,
   confirmToken: confirmTokenParam,
 });
@@ -229,7 +230,7 @@ interface CommandPlan {
  * `COMMAND_SPECS` and the same body builder the real call uses, so the preview
  * can't drift from the request.
  */
-function commandPreview(plan: CommandPlan, vinKey: string): Record<string, unknown> {
+function commandPreview(plan: CommandPlan, vehicleKey: string): Record<string, unknown> {
   // Widened to `CommandSpec`: the `as const` literal type drops `note` from the
   // entries that don't carry one.
   const spec: CommandSpec = COMMAND_SPECS[plan.command];
@@ -239,7 +240,7 @@ function commandPreview(plan: CommandPlan, vinKey: string): Record<string, unkno
     method: spec.method,
     path: spec.path,
     url: `${BASE_URL}${spec.path}`,
-    vinKey,
+    vehicleKey,
     ...(plan.body === undefined ? {} : { willSend: plan.body }),
     headers:
       'The full static Kia header set plus `sid`, `vinkey` and the mandatory RFC 1123 `date`, added by the client.',
@@ -267,7 +268,7 @@ export async function confirmVehicleCommand(
     /** `<service>.<verb>`, e.g. `vehicle.lock`. */
     action: string;
     command: KiaCommandName;
-    vinKey: string;
+    vehicleKey: string;
     /** The request body, when the endpoint takes one. */
     body?: unknown;
     /** Everything the user reviews. */
@@ -275,7 +276,7 @@ export async function confirmVehicleCommand(
     confirmToken: string | undefined;
   },
 ): ReturnType<typeof requireConfirmationWithFallback> {
-  const { command, vinKey, body, preview } = options;
+  const { command, vehicleKey, body, preview } = options;
   return requireConfirmationWithFallback(
     ctx,
     confirmationFromEnv({
@@ -285,8 +286,8 @@ export async function confirmVehicleCommand(
       tool: options.tool,
       confirmToken: options.confirmToken,
       subject: () => ({
-        target: vinKey,
-        payload: { command, vinKey, body },
+        target: vehicleKey,
+        payload: { command, vehicle_key: vehicleKey, body },
         preview,
       }),
     }),
@@ -300,11 +301,11 @@ export async function confirmVehicleCommand(
 async function runCommand(
   client: KiaCommandsClient,
   plan: CommandPlan,
-  args: { vinKey: string; waitSeconds: number },
+  args: { vehicleKey: string; waitSeconds: number },
   invoke: () => Promise<KiaCommandResult>,
 ): Promise<CallToolResult> {
   const spec = COMMAND_SPECS[plan.command];
-  const { vinKey, waitSeconds } = args;
+  const { vehicleKey, waitSeconds } = args;
   // The running tool call's cancellation. verifyCommand already stops its poll
   // loop on it; the steps around that loop must turn a cancellation into an
   // honest result too, rather than an exception that hides whether the command
@@ -315,21 +316,21 @@ async function runCommand(
   const cancelledNow = (): boolean => signal?.aborted === true;
 
   // Baseline first: it is both the diff reference and a cheap check that this
-  // vinKey exists — better to fail here than to fire a command at nothing.
+  // vehicleKey exists — better to fail here than to fire a command at nothing.
   let baselineInfo: Awaited<ReturnType<KiaCommandsClient['getVehicleStatus']>>;
   try {
-    baselineInfo = await client.getVehicleStatus(vinKey, { includeClimate: true });
+    baselineInfo = await client.getVehicleStatus(vehicleKey, { includeClimate: true });
   } catch (error) {
-    if (cancelledNow()) return cancelledBeforeSend(plan, vinKey);
+    if (cancelledNow()) return cancelledBeforeSend(plan, vehicleKey);
     throw error;
   }
   // Never fire a command for a caller that has already gone.
-  if (cancelledNow()) return cancelledBeforeSend(plan, vinKey);
+  if (cancelledNow()) return cancelledBeforeSend(plan, vehicleKey);
   if (baselineInfo === null) {
     throw new McpToolError(
-      `Kia returned no vehicle record for vinKey "${vinKey}" — no command was sent.`,
+      `Kia returned no vehicle record for vehicle_key "${vehicleKey}" — no command was sent.`,
       {
-        hint: 'Use the vehicle-list tool and pass its `vehicleKey` (not the VIN) as vinKey.',
+        hint: 'Use the vehicle-list tool and pass its `vehicleKey` (not the VIN) as vehicle_key.',
       },
     );
   }
@@ -344,9 +345,9 @@ async function runCommand(
   try {
     result = await invoke();
   } catch (error) {
-    if (cancelledNow()) return cancelledDuringSend(plan, vinKey, spec.proofFields, baseline);
+    if (cancelledNow()) return cancelledDuringSend(plan, vehicleKey, spec.proofFields, baseline);
     if (error instanceof KiaRequestTimeoutError) {
-      return timedOutDuringSend(plan, vinKey, spec.proofFields, baseline, error.timeoutMs);
+      return timedOutDuringSend(plan, vehicleKey, spec.proofFields, baseline, error.timeoutMs);
     }
     throw error;
   }
@@ -355,7 +356,7 @@ async function runCommand(
   try {
     verification = await client.verifyCommand<KiaVehicleStatus | null>(
       async () =>
-        extractVehicleStatus(await client.getVehicleStatus(vinKey, { includeClimate: true })),
+        extractVehicleStatus(await client.getVehicleStatus(vehicleKey, { includeClimate: true })),
       matchesExpectation,
       { baseline, timeoutMs: waitSeconds * 1000 },
     );
@@ -381,7 +382,7 @@ async function runCommand(
     command: plan.command,
     method: result.method,
     path: result.path,
-    vinKey,
+    vehicleKey,
     endpointVerified: result.verified,
     /** The command reached Kia. It must never be re-sent to "retry" verification. */
     commandSent: true,
@@ -417,11 +418,11 @@ async function runCommand(
 }
 
 /** Cancelled before the command request went out: nothing reached the car. */
-function cancelledBeforeSend(plan: CommandPlan, vinKey: string): CallToolResult {
+function cancelledBeforeSend(plan: CommandPlan, vehicleKey: string): CallToolResult {
   return minifiedResult({
     action: plan.action,
     command: plan.command,
-    vinKey,
+    vehicleKey,
     cancelled: true,
     commandSent: false,
     commandAccepted: false,
@@ -439,14 +440,14 @@ function cancelledBeforeSend(plan: CommandPlan, vinKey: string): CallToolResult 
  */
 function cancelledDuringSend(
   plan: CommandPlan,
-  vinKey: string,
+  vehicleKey: string,
   proofFields: readonly string[],
   baseline: KiaVehicleStatus | null,
 ): CallToolResult {
   return minifiedResult({
     action: plan.action,
     command: plan.command,
-    vinKey,
+    vehicleKey,
     cancelled: true,
     /** The request was in flight when the call was cancelled. */
     commandSent: 'unknown',
@@ -467,7 +468,7 @@ function cancelledDuringSend(
  */
 function timedOutDuringSend(
   plan: CommandPlan,
-  vinKey: string,
+  vehicleKey: string,
   proofFields: readonly string[],
   baseline: KiaVehicleStatus | null,
   timeoutMs: number,
@@ -475,7 +476,7 @@ function timedOutDuringSend(
   return minifiedResult({
     action: plan.action,
     command: plan.command,
-    vinKey,
+    vehicleKey,
     timedOut: true,
     commandSent: 'unknown',
     commandAccepted: 'unknown',
@@ -513,12 +514,12 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       name: 'kia_lock_doors',
       title: 'Lock doors',
       confirmAction: 'vehicle.lock',
-      plan: (vinKey) => ({
+      plan: (vehicleKey) => ({
         command: 'lock',
-        action: `Lock the doors of vehicle ${vinKey}`,
+        action: `Lock the doors of vehicle ${vehicleKey}`,
         expect: { doorLock: true },
       }),
-      invoke: (vinKey) => client.lockDoors(vinKey),
+      invoke: (vehicleKey) => client.lockDoors(vehicleKey),
       destructive: false,
       description:
         'Lock the vehicle doors (Kia `rems/door/lock`, live-verified). ' +
@@ -532,12 +533,12 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       name: 'kia_unlock_doors',
       title: 'Unlock doors',
       confirmAction: 'vehicle.unlock',
-      plan: (vinKey) => ({
+      plan: (vehicleKey) => ({
         command: 'unlock',
-        action: `Unlock the doors of vehicle ${vinKey}`,
+        action: `Unlock the doors of vehicle ${vehicleKey}`,
         expect: { doorLock: false },
       }),
-      invoke: (vinKey) => client.unlockDoors(vinKey),
+      invoke: (vehicleKey) => client.unlockDoors(vehicleKey),
       // Unlocking is the one command here that REDUCES the car's security and
       // leaves it that way until someone acts — treat it as destructive.
       destructive: true,
@@ -590,7 +591,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         defrost: z.boolean().default(false).describe('Run front defrost (default false).'),
       }),
     },
-    async ({ vinKey, waitSeconds, confirmToken, temperature, durationMinutes, defrost }, ctx) => {
+    async ({ vehicle_key: vehicleKey, waitSeconds, confirmToken, temperature, durationMinutes, defrost }, ctx) => {
       const options: StartClimateOptions = {
         // `airTempF` is typed `number`, but the builder stringifies it and Kia's
         // `airTemp.value` is a STRING whose domain includes the "LOW"/"HIGH"
@@ -603,7 +604,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       };
       const plan: CommandPlan = {
         command: 'start',
-        action: `Start climate on vehicle ${vinKey} (${temperature ?? 70}°F, ${durationMinutes} min${defrost ? ', defrost' : ''})`,
+        action: `Start climate on vehicle ${vehicleKey} (${temperature ?? 70}°F, ${durationMinutes} min${defrost ? ', defrost' : ''})`,
         expect: { 'climate.airCtrl': true },
         body: buildStartClimateBody(options),
       };
@@ -611,14 +612,14 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         tool: 'kia_start_climate',
         action: 'climate.start',
         command: plan.command,
-        vinKey,
+        vehicleKey,
         body: plan.body,
-        preview: commandPreview(plan, vinKey),
+        preview: commandPreview(plan, vehicleKey),
         confirmToken,
       });
       if (gate) return gate;
-      return runCommand(client, plan, { vinKey, waitSeconds }, () =>
-        client.startClimate(vinKey, options),
+      return runCommand(client, plan, { vehicleKey, waitSeconds }, () =>
+        client.startClimate(vehicleKey, options),
       );
     },
   );
@@ -643,23 +644,23 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       },
       inputSchema: baseArgs,
     },
-    async ({ vinKey, waitSeconds, confirmToken }, ctx) => {
+    async ({ vehicle_key: vehicleKey, waitSeconds, confirmToken }, ctx) => {
       const plan: CommandPlan = {
         command: 'stop',
-        action: `Stop climate on vehicle ${vinKey}`,
+        action: `Stop climate on vehicle ${vehicleKey}`,
         expect: { 'climate.airCtrl': false },
       };
       const gate = await confirmVehicleCommand(ctx, {
         tool: 'kia_stop_climate',
         action: 'climate.stop',
         command: plan.command,
-        vinKey,
+        vehicleKey,
         body: plan.body,
-        preview: commandPreview(plan, vinKey),
+        preview: commandPreview(plan, vehicleKey),
         confirmToken,
       });
       if (gate) return gate;
-      return runCommand(client, plan, { vinKey, waitSeconds }, () => client.stopClimate(vinKey));
+      return runCommand(client, plan, { vehicleKey, waitSeconds }, () => client.stopClimate(vehicleKey));
     },
   );
 }
@@ -675,8 +676,8 @@ function registerDoorTool(
     confirmAction: string;
     description: string;
     destructive: boolean;
-    plan: (vinKey: string) => CommandPlan;
-    invoke: (vinKey: string) => Promise<KiaCommandResult>;
+    plan: (vehicleKey: string) => CommandPlan;
+    invoke: (vehicleKey: string) => Promise<KiaCommandResult>;
   },
 ): void {
   server.registerTool(
@@ -694,19 +695,19 @@ function registerDoorTool(
       },
       inputSchema: baseArgs,
     },
-    async ({ vinKey, waitSeconds, confirmToken }, ctx) => {
-      const plan = tool.plan(vinKey);
+    async ({ vehicle_key: vehicleKey, waitSeconds, confirmToken }, ctx) => {
+      const plan = tool.plan(vehicleKey);
       const gate = await confirmVehicleCommand(ctx, {
         tool: tool.name,
         action: tool.confirmAction,
         command: plan.command,
-        vinKey,
+        vehicleKey,
         body: plan.body,
-        preview: commandPreview(plan, vinKey),
+        preview: commandPreview(plan, vehicleKey),
         confirmToken,
       });
       if (gate) return gate;
-      return runCommand(client, plan, { vinKey, waitSeconds }, () => tool.invoke(vinKey));
+      return runCommand(client, plan, { vehicleKey, waitSeconds }, () => tool.invoke(vehicleKey));
     },
   );
 }

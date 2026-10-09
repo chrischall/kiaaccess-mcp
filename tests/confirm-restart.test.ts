@@ -41,7 +41,7 @@ beforeAll(async () => {
         };
         const [token] = process.argv.slice(2);
         const harness = await createTestHarness((server) => registerCommandsTools(server, client));
-        const args = { vinKey: 'FAKE-VEHICLE-KEY', waitSeconds: 0, ...(token ? { confirmToken: token } : {}) };
+        const args = { vehicle_key: 'FAKE-VEHICLE-KEY', waitSeconds: 0, ...(token ? { confirmToken: token } : {}) };
         const res = await harness.callTool('kia_lock_doors', args);
         process.stdout.write(res.content.map((b) => b.text ?? '').join('\\n'));
         await harness.close();

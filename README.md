@@ -87,7 +87,7 @@ Run it through Claude, in this order:
 2. **`kia_start_login`** (asks you to confirm first) — sends your credentials, returns an `otpKey` and an `xid`, plus the masked phone/email Kia has on file.
 3. **`kia_send_otp`** — pick `SMS` or `EMAIL`. The passcode expires in about two minutes.
 4. **`kia_verify_otp`** — hand it the passcode. The token is stored locally and is deliberately **not** returned.
-5. **`kia_list_vehicles`** — confirms the session works and gives you the `vehicleKey` every other tool takes.
+5. **`kia_list_vehicles`** — confirms the session works and gives you the `vehicleKey` every other tool takes (as its `vehicle_key` argument).
 
 To start over (revoked token, changed password, handing the machine on), run **`kia_forget_session`** (asks you to confirm first) and repeat from step 2.
 
