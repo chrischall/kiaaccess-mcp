@@ -496,6 +496,43 @@ describe('confirmed execution', () => {
     await harness.close();
   });
 
+  it('flags alreadyInState and does not claim the re-read proves the command when the baseline already matched', async () => {
+    // cmm/gvi is a CACHED read. If it already said doorLock:true before the
+    // command, the first poll "confirms" without the car having done anything.
+    const { client, spies } = makeClient();
+    spies.getVehicleStatus.mockResolvedValue(
+      vehicleInfo({ doorLock: true, ign3: false, climate: { airCtrl: false } }),
+    );
+    spies.verifyCommand.mockResolvedValue(
+      verification({ attempts: 1, snapshot: { doorLock: true }, changedFields: [] }),
+    );
+    const harness = await harnessFor(client);
+
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.commandAccepted).toBe(true);
+    expect(payload.alreadyInState).toBe(true);
+    expect(String(payload.note)).not.toMatch(/re-read confirms it/);
+    expect(String(payload.note)).toMatch(/already/i);
+    expect(String(payload.note)).toContain('kia_refresh_status');
+    await harness.close();
+  });
+
+  it('reports alreadyInState:false when the baseline differed from the target', async () => {
+    const { client } = makeClient();
+    const harness = await harnessFor(client);
+
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.alreadyInState).toBe(false);
+    expect(String(payload.note)).toMatch(/re-read confirms it/);
+    await harness.close();
+  });
+
   it('reads a baseline before commanding and hands it to verifyCommand', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);

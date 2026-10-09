@@ -328,6 +328,11 @@ async function runCommand(
     );
   }
   const baseline = extractVehicleStatus(baselineInfo);
+  const matchesExpectation = (snapshot: KiaVehicleStatus | null): boolean =>
+    Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want);
+  // cmm/gvi is a CACHED read: if it already showed the target state before the
+  // command, a matching re-read proves nothing about whether the car acted.
+  const alreadyInState = matchesExpectation(baseline);
 
   let result: KiaCommandResult;
   try {
@@ -342,8 +347,7 @@ async function runCommand(
     verification = await client.verifyCommand<KiaVehicleStatus | null>(
       async () =>
         extractVehicleStatus(await client.getVehicleStatus(vinKey, { includeClimate: true })),
-      (snapshot) =>
-        Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want),
+      matchesExpectation,
       { baseline, timeoutMs: waitSeconds * 1000 },
     );
   } catch (error) {
@@ -375,6 +379,11 @@ async function runCommand(
     xid: result.xid,
     /** The re-read actually showed the expected state. This is the real proof. */
     stateConfirmed: verification.verified,
+    /**
+     * The (cached) baseline already showed the expected state before the
+     * command, so `stateConfirmed` cannot tell whether the car acted on it.
+     */
+    alreadyInState,
     cancelled: verification.cancelled,
     expected: plan.expect,
     observed: observeProof(verification.snapshot ?? null, spec.proofFields),
@@ -384,7 +393,11 @@ async function runCommand(
     elapsedSeconds: Math.round(verification.elapsedMs / 100) / 10,
     verificationMethod: NO_GTS_NOTE,
     note: verification.verified
-      ? `Kia accepted the command AND the re-read confirms it: ${describeExpectation(plan.expect)}.`
+      ? alreadyInState
+        ? `Kia accepted the command, and the vehicle reads ${describeExpectation(plan.expect)} — but it ALREADY ` +
+          'read that way before the command, and cmm/gvi is a cached read, so this does not prove the car acted. ' +
+          'If it matters, run kia_refresh_status, wait, and re-read kia_vehicle_status. Do not send the command again.'
+        : `Kia accepted the command AND the re-read confirms it: ${describeExpectation(plan.expect)}.`
       : `The command WAS sent and Kia ACCEPTED it, but the expected state (${describeExpectation(plan.expect)}) ` +
         `was NOT observed within ${waitSeconds}s${verification.cancelled ? ' (verification was cancelled)' : ''}. ` +
         'Changes were observed to take 30–60s, so it may still land — re-read the vehicle status before saying ' +

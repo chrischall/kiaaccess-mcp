@@ -84,6 +84,7 @@ Every write — each command, plus `kia_start_login`, `kia_forget_session` and `
 - **`status: "confirmation-required"` means nothing happened.** The tool made no network call and returned a `preview` of the exact request plus a `confirmToken`. Show the user that preview; never describe it as if the car acted.
 - **`commandAccepted` ≠ `stateConfirmed`.** Kia returning success only means the request was accepted. Only `stateConfirmed: true` means the car actually reads locked / unlocked / climate-on. Changes take 30–60 seconds; `waitSeconds` controls how long the tool keeps re-reading. It defaults to 30 so the call finishes inside a client's own request timeout; an unconfirmed result (or a client-side timeout) still means the command WAS sent — re-read the vehicle status, never re-send the command to "retry".
 - **`stateConfirmed: false` is not "it failed"** — it means the tool stopped waiting. Say exactly that, and offer to re-read `kia_vehicle_status`.
+- **`alreadyInState: true` weakens `stateConfirmed`.** The cached read already showed the target state before the command, so a matching re-read does not prove the car acted. Say so; if it matters, `kia_refresh_status`, wait, then re-read.
 - **On an EV, `engine` stays false with the climate running.** `ign3` is the ignition proxy. Never report the car as off because `engine` is false.
 - **`syncDate` advances on every read** and proves nothing changed.
 
