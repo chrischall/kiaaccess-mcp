@@ -1,7 +1,6 @@
 /**
  * Account + session tools: the one-time MFA bootstrap, a non-secret status
- * read, the refresh-token export a hosted deployment needs, and
- * the confirmation-gated way to throw the stored session away and start over.
+ * read, and the confirmation-gated way to throw the stored session away and start over.
  *
  * Kia's auth is a three-step challenge that is bootstrapped ONCE per device:
  *
@@ -25,19 +24,16 @@
  *     already-confirmed call, and `kia_verify_otp` needs a passcode only the
  *     account owner can read — gating them would add round-trips without adding
  *     a decision.
- *  2. **No tool returns a `sid` or an `rmtoken`** — except
- *     {@link registerSessionTools}'s explicit, confirmation-gated export, which
- *     exists solely so a hosted deployment can persist the token
- *     into the user's encrypted OAuth props. `KiaClient.completeLogin()`
- *     deliberately returns no secret, so the normal bootstrap can never echo
- *     one into a transcript.
+ *  2. **No tool returns a `sid` or an `rmtoken`.** `KiaClient.completeLogin()`
+ *     deliberately returns no secret, so the bootstrap can never echo one into
+ *     a transcript. (`kia_export_refresh_token`, which did, was removed: a
+ *     long-lived MFA bypass does not belong in conversation logs.)
  *  3. **Identifiers are masked.** The status read reports a masked account and
  *     only the first 8 characters of the device id: enough to confirm *which*
  *     account/device is wired up, not enough to be worth exfiltrating.
  */
 
 import {
-  McpToolError,
   confirmTokenParam,
   confirmationFromEnv,
   minifiedResult,
@@ -60,7 +56,6 @@ export type KiaSessionClient = Pick<
   | 'beginLogin'
   | 'sendLoginOtp'
   | 'completeLogin'
-  | 'exportRmToken'
   | 'forgetSession'
 >;
 
@@ -191,7 +186,7 @@ function registerSessionStatusTool(server: McpServer, client: KiaSessionClient):
 
 /**
  * The full stdio session surface: the status read plus the one-time MFA
- * bootstrap and the refresh-token export.
+ * bootstrap and the way to forget the stored session.
  */
 export function registerSessionTools(server: McpServer, client: KiaSessionClient): void {
   registerSessionStatusTool(server, client);
@@ -352,75 +347,6 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
           'The remember-me token was stored locally and is deliberately not returned. Kia does not rotate it, so ' +
           'this bootstrap does not need repeating unless the token is deleted or revoked.',
         nextStep: 'Run kia_list_vehicles to confirm the session works.',
-      });
-    },
-  );
-
-  server.registerTool(
-    'kia_export_refresh_token',
-    {
-      description:
-        'Return the stored Kia remember-me token (rmtoken) IN PLAINTEXT. This is a CREDENTIAL: it bypasses MFA ' +
-        'entirely and, with the account password, grants full control of the vehicle — including unlocking it. ' +
-        'It exists for one purpose: moving a locally-bootstrapped session into a hosted deployment, which stores ' +
-        'it in the user\'s encrypted credentials. Do NOT call it to "check the session" (use kia_session_status), ' +
-        'and never display or log the value except where the user explicitly asked for it. ' +
-        CONFIRM_DESCRIPTION +
-        ' Until it is confirmed the token is not even read.',
-      // Deliberately NOT readOnlyHint: this makes no remote change, but hosts
-      // auto-approve read-only tools, and a tool that emits a credential must
-      // stay an explicit, visible action.
-      annotations: toolAnnotations({
-        title: 'Export Kia refresh token (credential)',
-        readOnly: false,
-        idempotent: true,
-        openWorld: false,
-        destructive: true,
-      }),
-      inputSchema: z.object({ confirmToken: confirmTokenParam }),
-    },
-    async ({ confirmToken }, ctx) => {
-      const config = client.describeConfig();
-      const account = maskAccountId(config.accountId);
-      const gate = await confirmSessionAction(ctx, {
-        tool: 'kia_export_refresh_token',
-        action: 'session.export_token',
-        message: 'Review and confirm exporting this credential:',
-        confirmToken,
-        preview: {
-          action: `Return the Kia remember-me token for ${account ?? 'the configured account'}`,
-          account,
-          hasSession: config.hasSession,
-          warning:
-            'The value has NOT been read. It is a long-lived credential that bypasses MFA — confirm only if the ' +
-            'user asked to move this session somewhere else (e.g. a hosted deployment).',
-          hint: 'No token has been returned yet.',
-        },
-      });
-      if (gate) return gate;
-
-      const rmtoken = client.exportRmToken();
-      if (rmtoken === null) {
-        throw new McpToolError(
-          config.configured
-            ? 'No Kia remember-me token is stored for this account — the one-time MFA bootstrap has not been ' +
-                'completed on this device. Run kia_start_login, then kia_send_otp, then kia_verify_otp, and try again.'
-            : 'kiaaccess-mcp is not configured, so there is no account whose token could be exported. Set ' +
-                'KIA_USERNAME and KIA_PASSWORD first (see .env.example).',
-          {
-            hint: config.configured
-              ? 'Run kia_start_login, then kia_send_otp, then kia_verify_otp, and try again.'
-              : 'Set KIA_USERNAME and KIA_PASSWORD (see .env.example), then complete the login bootstrap.',
-          },
-        );
-      }
-
-      return minifiedResult({
-        account,
-        rmtoken,
-        warning:
-          'CREDENTIAL — this token bypasses MFA. Hand it only to the destination the user named, do not repeat it ' +
-          'in conversation, and treat any transcript containing it as containing a password.',
       });
     },
   );

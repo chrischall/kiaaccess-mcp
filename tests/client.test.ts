@@ -1119,7 +1119,6 @@ describe('MFA bootstrap through the client', () => {
     expect(JSON.stringify(completed)).not.toContain('fake-rmtoken-new');
     expect(io.saved).toHaveLength(1);
     expect(io.saved[0]).toMatchObject({ accountId: 'driver@example.test', rmtoken: 'fake-rmtoken-new', deviceId: DEVICE_ID });
-    expect(client.exportRmToken()).toBe('fake-rmtoken-new');
     expect(calls.map((c) => c.url.split('/v1/')[1])).toEqual(['prof/authUser', 'cmm/sendOTP', 'cmm/verifyOTP']);
   });
 
@@ -1150,7 +1149,6 @@ describe('MFA bootstrap through the client', () => {
     expect(client.hasSession()).toBe(true);
     client.forgetSession();
     expect(client.hasSession()).toBe(false);
-    expect(client.exportRmToken()).toBeNull();
   });
 
   it('re-reads KIA_RMTOKEN after forgetting, since the env var is host config not stored state', async () => {
@@ -1161,17 +1159,17 @@ describe('MFA bootstrap through the client', () => {
       deviceId: DEVICE_ID,
       updatedAt: '2026-07-27T19:00:00.000Z',
     });
-    const { fetchImpl } = stubFetch([]);
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
     const client = makeClient(fetchImpl, { rmtoken: undefined, sessionIO: io });
 
-    expect(client.exportRmToken()).toBe('fake-rmtoken-from-env');
     client.forgetSession();
 
     // The stored record is gone, but the host still supplies a token: the
     // next call must see it rather than demand a fresh MFA bootstrap.
     expect(io.load()).toBeNull();
     expect(client.hasSession()).toBe(true);
-    expect(client.exportRmToken()).toBe('fake-rmtoken-from-env');
+    await client.listVehicles();
+    expect(calls[0].init.headers.rmtoken).toBe('fake-rmtoken-from-env');
   });
 
   it('re-reads an injected rmtoken after forgetting', async () => {
@@ -1181,12 +1179,13 @@ describe('MFA bootstrap through the client', () => {
       deviceId: DEVICE_ID,
       updatedAt: '2026-07-27T19:00:00.000Z',
     });
-    const { fetchImpl } = stubFetch([]);
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
     const client = makeClient(fetchImpl, { sessionIO: io });
 
     client.forgetSession();
     expect(client.hasSession()).toBe(true);
-    expect(client.exportRmToken()).toBe(RMTOKEN);
+    await client.listVehicles();
+    expect(calls[0].init.headers.rmtoken).toBe(RMTOKEN);
   });
 
   it('reports no session for an unconfigured client instead of throwing', () => {
@@ -1194,7 +1193,6 @@ describe('MFA bootstrap through the client', () => {
     delete process.env.KIA_PASSWORD;
     const client = new KiaClient({ deviceId: DEVICE_ID, sessionIO: memoryIO() });
     expect(client.hasSession()).toBe(false);
-    expect(client.exportRmToken()).toBeNull();
     expect(() => client.forgetSession()).not.toThrow();
     expect(client.describeConfig()).toEqual({
       accountId: null,

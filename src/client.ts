@@ -519,17 +519,6 @@ export class KiaClient {
   }
 
   /**
-   * The remember-me token, for a caller that must persist it elsewhere (a
-   * hosted deployment stores it with the user's other credentials).
-   *
-   * **Secret.** Never return this from an MCP tool — it is a full MFA bypass.
-   */
-  exportRmToken(): string | null {
-    if (!this.isConfigured()) return null;
-    return this.loadRmToken();
-  }
-
-  /**
    * Forget the stored session; the next call needs a fresh MFA bootstrap.
    *
    * Only the local record is forgotten. An injected `rmtoken` or `KIA_RMTOKEN`
