@@ -21,6 +21,84 @@
     "ev",
     "mcp"
   ],
+  "tools": [
+    {
+      "name": "kia_healthcheck",
+      "description": "Check Kia credentials and session, then probe the API by listing vehicles"
+    },
+    {
+      "name": "kia_session_status",
+      "description": "Show whether a Kia session is bootstrapped and which write mode is active (no network call, no secrets)"
+    },
+    {
+      "name": "kia_start_login",
+      "description": "Start the Kia MFA login bootstrap (confirmation-gated)"
+    },
+    {
+      "name": "kia_send_otp",
+      "description": "Send the Kia one-time passcode by SMS or email"
+    },
+    {
+      "name": "kia_verify_otp",
+      "description": "Verify the Kia one-time passcode and store the session"
+    },
+    {
+      "name": "kia_forget_session",
+      "description": "Discard the stored Kia session so login can be re-run (local only, confirmation-gated)"
+    },
+    {
+      "name": "kia_export_refresh_token",
+      "description": "Export the stored Kia refresh token in plaintext for KIA_RMTOKEN (confirmation-gated)"
+    },
+    {
+      "name": "kia_list_vehicles",
+      "description": "List enrolled Kia vehicles with their vehicle keys, nicknames, models and mileage"
+    },
+    {
+      "name": "kia_vehicle_status",
+      "description": "Read a vehicle's cached status: doors, ignition, climate, EV battery and more"
+    },
+    {
+      "name": "kia_refresh_status",
+      "description": "Wake the vehicle's telematics unit for a fresh status reading (slow, draws power)"
+    },
+    {
+      "name": "kia_vehicle_location",
+      "description": "Read the vehicle's last reported location with a map link"
+    },
+    {
+      "name": "kia_charge_targets",
+      "description": "Read the EV target state of charge per plug type"
+    },
+    {
+      "name": "kia_start_climate",
+      "description": "Start climate preconditioning (confirmation-gated, KIA_WRITE_MODE comfort or all)"
+    },
+    {
+      "name": "kia_stop_climate",
+      "description": "Stop climate preconditioning (confirmation-gated, KIA_WRITE_MODE comfort or all)"
+    },
+    {
+      "name": "kia_start_charge",
+      "description": "Start charging a plugged-in EV (confirmation-gated, KIA_WRITE_MODE comfort or all)"
+    },
+    {
+      "name": "kia_stop_charge",
+      "description": "Stop EV charging (confirmation-gated, KIA_WRITE_MODE comfort or all)"
+    },
+    {
+      "name": "kia_set_charge_limits",
+      "description": "Set the EV target state of charge per plug type (confirmation-gated, KIA_WRITE_MODE comfort or all)"
+    },
+    {
+      "name": "kia_lock_doors",
+      "description": "Lock the vehicle's doors (confirmation-gated, KIA_WRITE_MODE all only)"
+    },
+    {
+      "name": "kia_unlock_doors",
+      "description": "Unlock the vehicle's doors (confirmation-gated, KIA_WRITE_MODE all only)"
+    }
+  ],
   "server": {
     "type": "node",
     "entry_point": "dist/bundle.js",

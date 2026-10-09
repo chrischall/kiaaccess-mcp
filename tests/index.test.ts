@@ -18,10 +18,13 @@
  * import time; `tests/server-boot.test.ts` exercises it as a real process.)
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestHarness } from '@chrischall/mcp-utils/test';
 import type { KiaClient } from '../src/client.js';
 import { TOOL_REGISTRARS } from '../src/registrars.js';
+import { VehicleKey } from '../src/tools/vehicle-key.js';
 
 // Registration never calls the client — it only closes over it — so an empty
 // stand-in is enough, and keeps this test away from credentials entirely.
@@ -192,6 +195,60 @@ describe('confirmation gating', () => {
       ]);
     } finally {
       await harness.close();
+    }
+  });
+});
+
+describe('manifest.json tools list', () => {
+  // The .mcpb manifest is what hosts and the mcp-host registry read to build a
+  // directory listing or an enabledTools allowlist without booting the server.
+  // It lists the FULL roster (KIA_WRITE_MODE=all): a tool that is gated off at
+  // registration is still part of what the package can serve.
+  const manifest = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../manifest.json', import.meta.url)), 'utf8'),
+  ) as { tools?: { name: string; description: string }[] };
+
+  it('declares every registered tool, and nothing else', async () => {
+    const declared = (manifest.tools ?? []).map((tool) => tool.name).sort();
+    expect(declared).toEqual(await rosterUnder('all'));
+  });
+
+  it('gives every declared tool a one-line description', () => {
+    for (const tool of manifest.tools ?? []) {
+      expect(tool.description.trim(), tool.name).not.toBe('');
+      expect(tool.description, tool.name).not.toMatch(/\n/);
+    }
+  });
+});
+
+describe('vehicle key argument', () => {
+  it('validates the vehicle key identically on every vehicle-scoped tool', async () => {
+    process.env.KIA_WRITE_MODE = 'all';
+    const harness = await createTestHarness(async (server) => {
+      for (const register of TOOL_REGISTRARS) await register(server, stubClient);
+    });
+    try {
+      const { tools } = await harness.client.listTools();
+      const shapes = new Map<string, string>();
+      for (const tool of tools) {
+        const properties = (tool.inputSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+        for (const name of ['vinKey', 'vehicle_key']) {
+          if (properties[name] === undefined) continue;
+          const { description: _description, ...shape } = properties[name];
+          shapes.set(`${tool.name}.${name}`, JSON.stringify(shape));
+        }
+      }
+      expect(shapes.size).toBe(11);
+      expect(new Set(shapes.values()).size).toBe(1);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('accepts a real-looking key and rejects header or path smuggling', () => {
+    expect(VehicleKey.safeParse('FAKE-VEHICLE-KEY_01').success).toBe(true);
+    for (const bad of ['', 'a/b', 'a b', 'a?b', 'a#b', '..', 'k\u00e9y', 'a\r\nX-Evil: 1', 'x'.repeat(201)]) {
+      expect(VehicleKey.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
   });
 });

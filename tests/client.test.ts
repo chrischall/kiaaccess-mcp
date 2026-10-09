@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withCallSignal } from '@chrischall/mcp-utils';
 import { KiaCredentialError } from '../src/auth.js';
@@ -376,13 +379,18 @@ describe('sid minting', () => {
     await withCallSignal(controller.signal, () => client.listVehicles());
 
     expect(calls).toHaveLength(2);
-    for (const call of calls) expect(call.init.signal).toBe(controller.signal);
+    // The request signal also carries the per-request deadline, so it is a
+    // combined signal rather than the caller's own — cancelling the call must
+    // still abort it.
+    for (const call of calls) expect(call.init.signal?.aborted).toBe(false);
+    controller.abort();
+    for (const call of calls) expect(call.init.signal?.aborted).toBe(true);
   });
 
-  it('sends no signal outside a tool call', async () => {
+  it('still bounds every request with a deadline outside a tool call', async () => {
     const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
     await makeClient(fetchImpl).listVehicles();
-    expect('signal' in calls[1].init).toBe(false);
+    expect(calls[1].init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('uses the global fetch when none is injected', async () => {
@@ -1213,5 +1221,80 @@ describe('MFA bootstrap through the client', () => {
     } finally {
       delete process.env.KIA_DEVICE_ID;
     }
+  });
+});
+
+describe('stored session device binding', () => {
+  const VEHICLES_OK: StubResponse = { body: { status: OK, payload: { vehicleSummary: [] } } };
+  const stored = (deviceId?: string): KiaStoredSession =>
+    ({
+      accountId: 'driver@example.test',
+      rmtoken: 'stored-rmtoken',
+      ...(deviceId === undefined ? {} : { deviceId }),
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }) as KiaStoredSession;
+  const storeClient = (fetchImpl: FetchLike, record: KiaStoredSession, deviceId?: string): KiaClient =>
+    new KiaClient({
+      username: 'driver@example.test',
+      password: 'fake-password',
+      ...(deviceId === undefined ? {} : { deviceId }),
+      sessionIO: memoryIO(record),
+      fetchImpl,
+    });
+
+  beforeEach(() => {
+    // Host-supplied tokens bypass the store entirely; keep them out of these cases.
+    delete process.env.KIA_RMTOKEN;
+  });
+
+  afterEach(() => {
+    delete process.env.KIA_DEVICE_ID;
+  });
+
+  it('uses a stored token minted against the same device id', async () => {
+    const { fetchImpl, calls } = stubFetch([AUTH_OK, VEHICLES_OK]);
+    await storeClient(fetchImpl, stored(DEVICE_ID), DEVICE_ID).listVehicles();
+    expect(calls[0].init.headers.deviceid).toBe(DEVICE_ID);
+  });
+
+  it('refuses, without contacting Kia, a stored token minted for a different explicit device id', async () => {
+    const { fetchImpl, calls } = stubFetch([]);
+    const client = storeClient(fetchImpl, stored('OTHER-DEVICE-ID'), DEVICE_ID);
+    expect(client.hasSession()).toBe(false);
+    const err = await client.listVehicles().catch((e: unknown) => e as Error);
+    expect(err.message).toMatch(/different device/i);
+    expect(err.message).toContain('KIA_DEVICE_ID');
+    expect(err.message).not.toContain('OTHER-DEVICE-ID');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('treats a mismatched KIA_DEVICE_ID the same way', async () => {
+    process.env.KIA_DEVICE_ID = 'ENV-DEVICE-ID';
+    const { fetchImpl, calls } = stubFetch([]);
+    const client = storeClient(fetchImpl, stored('OTHER-DEVICE-ID'));
+    await expect(client.listVehicles()).rejects.toThrow(/different device/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('adopts the stored device id when none is configured (e.g. the device-id file was lost)', async () => {
+    const realHome = process.env.HOME;
+    const tmpHome = mkdtempSync(join(tmpdir(), 'kiaaccess-home-'));
+    process.env.HOME = tmpHome;
+    try {
+      const { fetchImpl, calls } = stubFetch([AUTH_OK, VEHICLES_OK]);
+      const client = storeClient(fetchImpl, stored('STORED-DEVICE-ID'));
+      await client.listVehicles();
+      for (const call of calls) expect(call.init.headers.deviceid).toBe('STORED-DEVICE-ID');
+      expect(client.describeConfig().deviceId).toBe('STORED-DEVICE-ID');
+    } finally {
+      if (realHome === undefined) delete process.env.HOME;
+      else process.env.HOME = realHome;
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a legacy record that predates the deviceId field', async () => {
+    const { fetchImpl } = stubFetch([AUTH_OK, VEHICLES_OK]);
+    await expect(storeClient(fetchImpl, stored(), DEVICE_ID).listVehicles()).resolves.toBeDefined();
   });
 });

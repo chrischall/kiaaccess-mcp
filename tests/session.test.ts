@@ -8,7 +8,6 @@ import {
   createSessionIO,
   diskSessionIO,
   type KiaStoredSession,
-  nullSessionIO,
   openSessionStore,
   sessionFilePath,
 } from '../src/session.js';
@@ -185,14 +184,6 @@ describe('createSessionIO', () => {
       expect.stringMatching(/could not save/),
       expect.stringMatching(/could not clear/),
     ]);
-  });
-});
-
-describe('nullSessionIO', () => {
-  it('is a no-op store for runtimes without a filesystem', () => {
-    expect(nullSessionIO.load(ACCOUNT)).toBeNull();
-    expect(() => nullSessionIO.save(record())).not.toThrow();
-    expect(() => nullSessionIO.clear(ACCOUNT)).not.toThrow();
   });
 });
 

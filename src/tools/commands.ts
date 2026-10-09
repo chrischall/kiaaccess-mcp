@@ -24,7 +24,6 @@
 import type { McpServer, CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import {
   McpToolError,
-  SafePathSegment,
   confirmTokenParam,
   confirmationFromEnv,
   currentCallSignal,
@@ -43,7 +42,14 @@ import {
   buildStartClimateBody,
   extractVehicleStatus,
 } from '../client.js';
-import { BASE_URL, COMMAND_SPECS, type CommandSpec, type KiaCommandName } from '../protocol.js';
+import {
+  BASE_URL,
+  COMMAND_SPECS,
+  KiaRequestTimeoutError,
+  type CommandSpec,
+  type KiaCommandName,
+} from '../protocol.js';
+import { VehicleKey } from './vehicle-key.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so a real client
@@ -93,7 +99,7 @@ export function getKiaWriteMode(): KiaWriteMode {
 // Shared argument atoms
 // ---------------------------------------------------------------------------
 
-const vinKeyArg = SafePathSegment.describe(
+const vinKeyArg = VehicleKey.describe(
   'The vehicle key (`vehicleKey` from the vehicle-list tool), used as the `vinkey` header. Not the VIN.',
 );
 
@@ -328,12 +334,20 @@ async function runCommand(
     );
   }
   const baseline = extractVehicleStatus(baselineInfo);
+  const matchesExpectation = (snapshot: KiaVehicleStatus | null): boolean =>
+    Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want);
+  // cmm/gvi is a CACHED read: if it already showed the target state before the
+  // command, a matching re-read proves nothing about whether the car acted.
+  const alreadyInState = matchesExpectation(baseline);
 
   let result: KiaCommandResult;
   try {
     result = await invoke();
   } catch (error) {
     if (cancelledNow()) return cancelledDuringSend(plan, vinKey, spec.proofFields, baseline);
+    if (error instanceof KiaRequestTimeoutError) {
+      return timedOutDuringSend(plan, vinKey, spec.proofFields, baseline, error.timeoutMs);
+    }
     throw error;
   }
 
@@ -342,22 +356,23 @@ async function runCommand(
     verification = await client.verifyCommand<KiaVehicleStatus | null>(
       async () =>
         extractVehicleStatus(await client.getVehicleStatus(vinKey, { includeClimate: true })),
-      (snapshot) =>
-        Object.entries(plan.expect).every(([field, want]) => readPath(snapshot, field) === want),
+      matchesExpectation,
       { baseline, timeoutMs: waitSeconds * 1000 },
     );
   } catch (error) {
-    // A re-read aborted mid-flight. The command itself was sent and accepted,
-    // so report exactly that — with no observed state — instead of an error
-    // that reads as "the command failed" and invites a re-send.
-    if (!cancelledNow()) throw error;
+    // A re-read aborted mid-flight (cancelled, or it hit the per-request
+    // deadline). The command itself was sent and accepted, so report exactly
+    // that — with no observed state — instead of an error that reads as "the
+    // command failed" and invites a re-send.
+    const cancelled = cancelledNow();
+    if (!cancelled && !(error instanceof KiaRequestTimeoutError)) throw error;
     verification = {
       verified: false,
       attempts: 0,
       elapsedMs: 0,
       snapshot: null,
       changedFields: [],
-      cancelled: true,
+      cancelled,
     };
   }
 
@@ -375,6 +390,11 @@ async function runCommand(
     xid: result.xid,
     /** The re-read actually showed the expected state. This is the real proof. */
     stateConfirmed: verification.verified,
+    /**
+     * The (cached) baseline already showed the expected state before the
+     * command, so `stateConfirmed` cannot tell whether the car acted on it.
+     */
+    alreadyInState,
     cancelled: verification.cancelled,
     expected: plan.expect,
     observed: observeProof(verification.snapshot ?? null, spec.proofFields),
@@ -384,7 +404,11 @@ async function runCommand(
     elapsedSeconds: Math.round(verification.elapsedMs / 100) / 10,
     verificationMethod: NO_GTS_NOTE,
     note: verification.verified
-      ? `Kia accepted the command AND the re-read confirms it: ${describeExpectation(plan.expect)}.`
+      ? alreadyInState
+        ? `Kia accepted the command, and the vehicle reads ${describeExpectation(plan.expect)} — but it ALREADY ` +
+          'read that way before the command, and cmm/gvi is a cached read, so this does not prove the car acted. ' +
+          'If it matters, run kia_refresh_status, wait, and re-read kia_vehicle_status. Do not send the command again.'
+        : `Kia accepted the command AND the re-read confirms it: ${describeExpectation(plan.expect)}.`
       : `The command WAS sent and Kia ACCEPTED it, but the expected state (${describeExpectation(plan.expect)}) ` +
         `was NOT observed within ${waitSeconds}s${verification.cancelled ? ' (verification was cancelled)' : ''}. ` +
         'Changes were observed to take 30–60s, so it may still land — re-read the vehicle status before saying ' +
@@ -434,6 +458,34 @@ function cancelledDuringSend(
       'The call was cancelled while the command request was in flight, so it may have reached Kia and may still ' +
       `take effect (${describeExpectation(plan.expect)}). Re-read the vehicle status before sending it again, and ` +
       'do not report this as done.',
+  });
+}
+
+/**
+ * The command request hit the per-request deadline: like a cancellation in
+ * flight, it may or may not have reached Kia.
+ */
+function timedOutDuringSend(
+  plan: CommandPlan,
+  vinKey: string,
+  proofFields: readonly string[],
+  baseline: KiaVehicleStatus | null,
+  timeoutMs: number,
+): CallToolResult {
+  return minifiedResult({
+    action: plan.action,
+    command: plan.command,
+    vinKey,
+    timedOut: true,
+    commandSent: 'unknown',
+    commandAccepted: 'unknown',
+    stateConfirmed: false,
+    expected: plan.expect,
+    baselineObserved: observeProof(baseline, proofFields),
+    note:
+      `Kia did not answer within ${Math.round(timeoutMs / 1000)}s, so the command request was abandoned. It may ` +
+      `have reached Kia and may still take effect (${describeExpectation(plan.expect)}). Re-read the vehicle status ` +
+      'before sending it again, and do not report this as done.',
   });
 }
 

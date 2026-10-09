@@ -10,7 +10,12 @@
  * import cycle.
  */
 
-import { McpToolError, currentCallSignal, truncateErrorMessage } from '@chrischall/mcp-utils';
+import {
+  McpToolError,
+  readIntEnv,
+  truncateErrorMessage,
+  withAmbientCancellation,
+} from '@chrischall/mcp-utils';
 
 /** API root. Ends in `/` so endpoint paths concatenate directly. */
 export const BASE_URL = 'https://api.owners.kia.com/apigw/v1/';
@@ -331,11 +336,44 @@ export interface KiaRawResponse {
   httpStatus: number;
 }
 
+/** Per-request deadline when `KIA_REQUEST_TIMEOUT_MS` is unset or invalid. */
+export const DEFAULT_KIA_REQUEST_TIMEOUT_MS = 30_000;
+
+/** The per-request deadline: `KIA_REQUEST_TIMEOUT_MS` (a positive integer), else 30s. */
+export function kiaRequestTimeoutMs(): number {
+  return readIntEnv('KIA_REQUEST_TIMEOUT_MS', { default: DEFAULT_KIA_REQUEST_TIMEOUT_MS, min: 1 }) as number;
+}
+
+/**
+ * Kia did not answer within the per-request deadline, so the request was
+ * abandoned. Whether Kia RECEIVED it is unknown — for a vehicle command that
+ * means it may still take effect, and must not be blindly re-sent.
+ */
+export class KiaRequestTimeoutError extends McpToolError {
+  constructor(method: string, path: string, readonly timeoutMs: number) {
+    super(
+      `Kia did not answer ${method} ${path} within ${Math.round(timeoutMs / 1000)}s, so the request was abandoned. ` +
+        'Whether Kia received it is unknown.',
+      {
+        hint:
+          'If this was a vehicle command it may still take effect: re-read the vehicle status before sending it ' +
+          'again. Raise KIA_REQUEST_TIMEOUT_MS if Kia is consistently this slow.',
+      },
+    );
+    this.name = 'KiaRequestTimeoutError';
+  }
+}
+
 /**
  * Perform one Kia API call and parse the JSON body. Success is deliberately NOT
  * asserted here: the auth bootstrap needs to inspect credential rejections and
  * the client needs the session-expiry heuristic before deciding what a
  * non-zero `statusCode` means.
+ *
+ * Every request is bounded by {@link kiaRequestTimeoutMs}, so a stalled
+ * connection fails with {@link KiaRequestTimeoutError} instead of holding the
+ * tool call until the MCP client's own (often 60s) deadline. Nothing here
+ * retries, so a timed-out command POST is never sent twice.
  */
 export async function sendKiaRequest(
   path: string,
@@ -347,16 +385,25 @@ export async function sendKiaRequest(
   },
 ): Promise<KiaRawResponse> {
   const fetchImpl = opts.fetchImpl ?? defaultFetch;
-  // Ambient, so every call site — auth, reads, commands — honours the caller
-  // going away without threading a signal through each of them.
-  const signal = currentCallSignal();
-  const response = await fetchImpl(`${BASE_URL}${path}`, {
-    method: opts.method,
-    headers: opts.headers,
-    ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
-    ...(signal === undefined ? {} : { signal }),
-  });
-  const text = await response.text();
+  const timeoutMs = kiaRequestTimeoutMs();
+  const deadline = AbortSignal.timeout(timeoutMs);
+  // Ambient cancellation folded in, so every call site — auth, reads, commands —
+  // honours the caller going away without threading a signal through each.
+  const signal = withAmbientCancellation(deadline) as AbortSignal;
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetchImpl(`${BASE_URL}${path}`, {
+      method: opts.method,
+      headers: opts.headers,
+      ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
+      signal,
+    });
+    text = await response.text();
+  } catch (error) {
+    if (deadline.aborted) throw new KiaRequestTimeoutError(opts.method, path, timeoutMs);
+    throw error;
+  }
   try {
     return { body: JSON.parse(text) as unknown, headers: response.headers, httpStatus: response.status };
   } catch {

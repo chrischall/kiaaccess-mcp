@@ -132,7 +132,7 @@ function expectNoMutations(): void {
 // --- registration -----------------------------------------------------------
 
 describe('registerVehiclesTools', () => {
-  it('registers exactly the four read-only vehicle tools', async () => {
+  it('registers exactly the four vehicle read tools', async () => {
     const names = (await harness.listTools()).map((t) => t.name).sort();
     expect(names).toEqual([
       'kia_list_vehicles',
@@ -142,12 +142,23 @@ describe('registerVehiclesTools', () => {
     ]);
   });
 
-  it('annotates every tool readOnlyHint: true', async () => {
+  it('annotates every pure read readOnlyHint: true', async () => {
     const { tools } = await harness.client.listTools();
     expect(tools).toHaveLength(4);
-    for (const tool of tools) {
+    for (const tool of tools.filter((t) => t.name !== 'kia_refresh_status')) {
       expect(tool.annotations?.readOnlyHint, `${tool.name} must be readOnlyHint: true`).toBe(true);
     }
+  });
+
+  it('does not let hosts auto-approve kia_refresh_status: it wakes the telematics unit', async () => {
+    // Hosts auto-approve readOnlyHint tools, so a loop could wake the modem
+    // (12V drain, Kia's daily refresh limit) with no user approval. It is an
+    // additive side effect, not a destructive one, and repeating it repeats it.
+    const { tools } = await harness.client.listTools();
+    const annotations = tools.find((t) => t.name === 'kia_refresh_status')?.annotations;
+    expect(annotations?.readOnlyHint).toBe(false);
+    expect(annotations?.destructiveHint).toBe(false);
+    expect(annotations?.idempotentHint).toBe(false);
   });
 
   it('registers no mutating tool: nothing here takes a confirmation gate', async () => {

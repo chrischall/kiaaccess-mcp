@@ -22,7 +22,6 @@
 
 import {
   McpToolError,
-  SafePathSegment,
   minifiedResult,
   toolAnnotations,
 } from '@chrischall/mcp-utils';
@@ -30,6 +29,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { extractVehicleStatus } from '../client.js';
 import type { KiaClient, KiaSeatHeatVent, KiaVehicleInfo, KiaVehicleSummary } from '../client.js';
+import { VehicleKey } from './vehicle-key.js';
 
 /** How many trailing VIN characters stay visible. */
 const VIN_VISIBLE_SUFFIX = 6;
@@ -156,7 +156,7 @@ function describeSeats(
 }
 
 /** The optional vehicle selector every tool in this file accepts. */
-const vehicleKeyInput = SafePathSegment.describe(
+const vehicleKeyInput = VehicleKey.describe(
   'vehicleKey from kia_list_vehicles. Optional: defaults to the only vehicle when the account has exactly one.',
 ).optional();
 
@@ -272,8 +272,12 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'kia_vehicle_status afterwards to see the refreshed values.',
       annotations: toolAnnotations({
         title: 'Refresh Kia vehicle status',
-        readOnly: true,
-        idempotent: true,
+        // Not read-only: hosts auto-approve readOnlyHint tools, and every call
+        // wakes the modem (12V drain, Kia rate-limits refreshes per day). It
+        // adds a reading rather than overwriting anything, so not destructive.
+        readOnly: false,
+        destructive: false,
+        idempotent: false,
         openWorld: true,
       }),
       inputSchema: z.object({ vehicle_key: vehicleKeyInput }),

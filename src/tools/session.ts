@@ -149,18 +149,8 @@ function confirmSessionAction(
 // Registrar
 // ---------------------------------------------------------------------------
 
-/**
- * The one session tool that is safe everywhere: a non-secret, no-network config
- * read.
- *
- * Split out from {@link registerSessionTools} so a deployment can register
- * THIS and nothing else from this file. The MFA bootstrap cannot work without
- * a person at the device (the passcode arrives minutes later on another one)
- * and `kia_export_refresh_token` emits a credential such a runtime
- * was handed rather than one it owns — so both are stdio-only. Extracting the
- * status tool keeps that split from becoming a second copy of it.
- */
-export function registerSessionStatusTool(server: McpServer, client: KiaSessionClient): void {
+/** `kia_session_status`: a non-secret, no-network config read. */
+function registerSessionStatusTool(server: McpServer, client: KiaSessionClient): void {
   // Resolved ONCE, here, for reporting — this is the value that decided which
   // command tools exist in this process. Re-reading it per call would report a
   // mode that does not match the registered surface.

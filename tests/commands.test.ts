@@ -14,6 +14,7 @@ import {
   registerCommandsTools,
 } from '../src/tools/commands.js';
 import { z } from 'zod';
+import { KiaRequestTimeoutError } from '../src/protocol.js';
 import {
   callConfirmed,
   previewOf,
@@ -496,6 +497,43 @@ describe('confirmed execution', () => {
     await harness.close();
   });
 
+  it('flags alreadyInState and does not claim the re-read proves the command when the baseline already matched', async () => {
+    // cmm/gvi is a CACHED read. If it already said doorLock:true before the
+    // command, the first poll "confirms" without the car having done anything.
+    const { client, spies } = makeClient();
+    spies.getVehicleStatus.mockResolvedValue(
+      vehicleInfo({ doorLock: true, ign3: false, climate: { airCtrl: false } }),
+    );
+    spies.verifyCommand.mockResolvedValue(
+      verification({ attempts: 1, snapshot: { doorLock: true }, changedFields: [] }),
+    );
+    const harness = await harnessFor(client);
+
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.commandAccepted).toBe(true);
+    expect(payload.alreadyInState).toBe(true);
+    expect(String(payload.note)).not.toMatch(/re-read confirms it/);
+    expect(String(payload.note)).toMatch(/already/i);
+    expect(String(payload.note)).toContain('kia_refresh_status');
+    await harness.close();
+  });
+
+  it('reports alreadyInState:false when the baseline differed from the target', async () => {
+    const { client } = makeClient();
+    const harness = await harnessFor(client);
+
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.alreadyInState).toBe(false);
+    expect(String(payload.note)).toMatch(/re-read confirms it/);
+    await harness.close();
+  });
+
   it('reads a baseline before commanding and hands it to verifyCommand', async () => {
     const { client, spies } = makeClient();
     const harness = await harnessFor(client);
@@ -843,6 +881,41 @@ describe('cancellation outside the poll loop', () => {
     expect(String(payload.note)).toMatch(/may have reached Kia/);
     expect(String(payload.note)).toMatch(/re-read the vehicle status/i);
     expect(spies.verifyCommand).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown send state when the command request times out', async () => {
+    const { client, spies } = makeClient();
+    spies.lockDoors.mockRejectedValue(new KiaRequestTimeoutError('GET', 'rems/door/lock', 30_000));
+    const harness = await harnessFor(client);
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.timedOut).toBe(true);
+    expect(payload.cancelled).toBeUndefined();
+    expect(payload.commandSent).toBe('unknown');
+    expect(payload.commandAccepted).toBe('unknown');
+    expect(payload.stateConfirmed).toBe(false);
+    expect(String(payload.note)).toMatch(/did not answer within 30s/);
+    expect(String(payload.note)).toMatch(/re-read the vehicle status/i);
+    expect(spies.verifyCommand).not.toHaveBeenCalled();
+    await harness.close();
+  });
+
+  it('keeps commandSent:true when a verification re-read times out', async () => {
+    const { client, spies } = makeClient();
+    spies.verifyCommand.mockRejectedValue(new KiaRequestTimeoutError('POST', 'cmm/gvi', 30_000));
+    const harness = await harnessFor(client);
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.commandSent).toBe(true);
+    expect(payload.commandAccepted).toBe(true);
+    expect(payload.stateConfirmed).toBe(false);
+    expect(payload.cancelled).toBe(false);
+    expect(String(payload.note)).toMatch(/do not send it again/);
+    await harness.close();
   });
 
   it('keeps commandSent:true when cancellation lands during a verification re-read', async () => {

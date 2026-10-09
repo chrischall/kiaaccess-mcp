@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { withCallSignal } from '@chrischall/mcp-utils';
 import {
   BASE_URL,
   COMMAND_SPECS,
@@ -8,6 +9,11 @@ import {
   KIA_ERROR_MISSING_HEADER_DATA,
   KIA_STATIC_HEADERS,
   KiaApiError,
+  KiaRequestTimeoutError,
+  DEFAULT_KIA_REQUEST_TIMEOUT_MS,
+  kiaRequestTimeoutMs,
+  sendKiaRequest,
+  type FetchLike,
   assertKiaSuccess,
   buildHeaders,
   gmtOffsetHours,
@@ -241,5 +247,83 @@ describe('COMMAND_SPECS', () => {
     // evc/sts is proven by re-reading evc/gts, which the tool does itself.
     expect(COMMAND_SPECS.setChargeTargets.proofFields).toEqual([]);
     expect(COMMAND_SPECS.setChargeTargets.note).toMatch(/BOTH plug types/);
+  });
+});
+
+describe('sendKiaRequest deadline', () => {
+  const original = process.env.KIA_REQUEST_TIMEOUT_MS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.KIA_REQUEST_TIMEOUT_MS;
+    else process.env.KIA_REQUEST_TIMEOUT_MS = original;
+  });
+
+  /** A fetch that never answers, but honours its abort signal like real fetch. */
+  const hangingFetch: FetchLike = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+    });
+
+  it('defaults to 30s and reads KIA_REQUEST_TIMEOUT_MS', () => {
+    delete process.env.KIA_REQUEST_TIMEOUT_MS;
+    expect(DEFAULT_KIA_REQUEST_TIMEOUT_MS).toBe(30_000);
+    expect(kiaRequestTimeoutMs()).toBe(30_000);
+    process.env.KIA_REQUEST_TIMEOUT_MS = '5000';
+    expect(kiaRequestTimeoutMs()).toBe(5000);
+    process.env.KIA_REQUEST_TIMEOUT_MS = 'junk';
+    expect(kiaRequestTimeoutMs()).toBe(30_000);
+    process.env.KIA_REQUEST_TIMEOUT_MS = '0';
+    expect(kiaRequestTimeoutMs()).toBe(30_000);
+  });
+
+  it('abandons a stalled request with a timeout error instead of waiting for the client deadline', async () => {
+    process.env.KIA_REQUEST_TIMEOUT_MS = '20';
+    const error = await sendKiaRequest('rems/door/unlock', {
+      method: 'GET',
+      headers: {},
+      fetchImpl: hangingFetch,
+    }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(KiaRequestTimeoutError);
+    expect(String((error as Error).message)).toContain('rems/door/unlock');
+    expect(String((error as Error).message)).toMatch(/unknown/i);
+    expect(JSON.stringify(error)).not.toContain('password');
+  });
+
+  it('times out a body that stalls after the headers arrive', async () => {
+    process.env.KIA_REQUEST_TIMEOUT_MS = '20';
+    const stalledBody: FetchLike = async (_url, init) =>
+      ({
+        status: 200,
+        headers: new Headers(),
+        text: () =>
+          new Promise<string>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+          }),
+      }) as unknown as Response;
+    await expect(
+      sendKiaRequest('cmm/gvi', { method: 'POST', headers: {}, fetchImpl: stalledBody }),
+    ).rejects.toBeInstanceOf(KiaRequestTimeoutError);
+  });
+
+  it('reports a caller cancellation as the cancellation, not as a timeout', async () => {
+    const controller = new AbortController();
+    const pending = withCallSignal(controller.signal, () =>
+      sendKiaRequest('cmm/gvi', { method: 'POST', headers: {}, fetchImpl: hangingFetch }),
+    );
+    controller.abort();
+    const error = await pending.catch((err: unknown) => err);
+    expect(error).not.toBeInstanceOf(KiaRequestTimeoutError);
+  });
+
+  it('rethrows a network failure unchanged', async () => {
+    const boom = new TypeError('fetch failed');
+    await expect(
+      sendKiaRequest('cmm/gvi', {
+        method: 'POST',
+        headers: {},
+        fetchImpl: async () => {
+          throw boom;
+        },
+      }),
+    ).rejects.toBe(boom);
   });
 });
