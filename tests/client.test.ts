@@ -376,13 +376,18 @@ describe('sid minting', () => {
     await withCallSignal(controller.signal, () => client.listVehicles());
 
     expect(calls).toHaveLength(2);
-    for (const call of calls) expect(call.init.signal).toBe(controller.signal);
+    // The request signal also carries the per-request deadline, so it is a
+    // combined signal rather than the caller's own — cancelling the call must
+    // still abort it.
+    for (const call of calls) expect(call.init.signal?.aborted).toBe(false);
+    controller.abort();
+    for (const call of calls) expect(call.init.signal?.aborted).toBe(true);
   });
 
-  it('sends no signal outside a tool call', async () => {
+  it('still bounds every request with a deadline outside a tool call', async () => {
     const { fetchImpl, calls } = stubFetch([AUTH_OK, { body: { status: OK, payload: { vehicleSummary: [] } } }]);
     await makeClient(fetchImpl).listVehicles();
-    expect('signal' in calls[1].init).toBe(false);
+    expect(calls[1].init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('uses the global fetch when none is injected', async () => {

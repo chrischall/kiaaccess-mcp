@@ -14,6 +14,7 @@ import {
   registerCommandsTools,
 } from '../src/tools/commands.js';
 import { z } from 'zod';
+import { KiaRequestTimeoutError } from '../src/protocol.js';
 import {
   callConfirmed,
   previewOf,
@@ -880,6 +881,41 @@ describe('cancellation outside the poll loop', () => {
     expect(String(payload.note)).toMatch(/may have reached Kia/);
     expect(String(payload.note)).toMatch(/re-read the vehicle status/i);
     expect(spies.verifyCommand).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown send state when the command request times out', async () => {
+    const { client, spies } = makeClient();
+    spies.lockDoors.mockRejectedValue(new KiaRequestTimeoutError('GET', 'rems/door/lock', 30_000));
+    const harness = await harnessFor(client);
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.timedOut).toBe(true);
+    expect(payload.cancelled).toBeUndefined();
+    expect(payload.commandSent).toBe('unknown');
+    expect(payload.commandAccepted).toBe('unknown');
+    expect(payload.stateConfirmed).toBe(false);
+    expect(String(payload.note)).toMatch(/did not answer within 30s/);
+    expect(String(payload.note)).toMatch(/re-read the vehicle status/i);
+    expect(spies.verifyCommand).not.toHaveBeenCalled();
+    await harness.close();
+  });
+
+  it('keeps commandSent:true when a verification re-read times out', async () => {
+    const { client, spies } = makeClient();
+    spies.verifyCommand.mockRejectedValue(new KiaRequestTimeoutError('POST', 'cmm/gvi', 30_000));
+    const harness = await harnessFor(client);
+    const payload = parseToolResult<Record<string, unknown>>(
+      await callConfirmed(harness, 'kia_lock_doors', { vinKey: VIN_KEY }),
+    );
+
+    expect(payload.commandSent).toBe(true);
+    expect(payload.commandAccepted).toBe(true);
+    expect(payload.stateConfirmed).toBe(false);
+    expect(payload.cancelled).toBe(false);
+    expect(String(payload.note)).toMatch(/do not send it again/);
+    await harness.close();
   });
 
   it('keeps commandSent:true when cancellation lands during a verification re-read', async () => {

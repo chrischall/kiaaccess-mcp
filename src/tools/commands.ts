@@ -43,7 +43,13 @@ import {
   buildStartClimateBody,
   extractVehicleStatus,
 } from '../client.js';
-import { BASE_URL, COMMAND_SPECS, type CommandSpec, type KiaCommandName } from '../protocol.js';
+import {
+  BASE_URL,
+  COMMAND_SPECS,
+  KiaRequestTimeoutError,
+  type CommandSpec,
+  type KiaCommandName,
+} from '../protocol.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so a real client
@@ -339,6 +345,9 @@ async function runCommand(
     result = await invoke();
   } catch (error) {
     if (cancelledNow()) return cancelledDuringSend(plan, vinKey, spec.proofFields, baseline);
+    if (error instanceof KiaRequestTimeoutError) {
+      return timedOutDuringSend(plan, vinKey, spec.proofFields, baseline, error.timeoutMs);
+    }
     throw error;
   }
 
@@ -351,17 +360,19 @@ async function runCommand(
       { baseline, timeoutMs: waitSeconds * 1000 },
     );
   } catch (error) {
-    // A re-read aborted mid-flight. The command itself was sent and accepted,
-    // so report exactly that — with no observed state — instead of an error
-    // that reads as "the command failed" and invites a re-send.
-    if (!cancelledNow()) throw error;
+    // A re-read aborted mid-flight (cancelled, or it hit the per-request
+    // deadline). The command itself was sent and accepted, so report exactly
+    // that — with no observed state — instead of an error that reads as "the
+    // command failed" and invites a re-send.
+    const cancelled = cancelledNow();
+    if (!cancelled && !(error instanceof KiaRequestTimeoutError)) throw error;
     verification = {
       verified: false,
       attempts: 0,
       elapsedMs: 0,
       snapshot: null,
       changedFields: [],
-      cancelled: true,
+      cancelled,
     };
   }
 
@@ -447,6 +458,34 @@ function cancelledDuringSend(
       'The call was cancelled while the command request was in flight, so it may have reached Kia and may still ' +
       `take effect (${describeExpectation(plan.expect)}). Re-read the vehicle status before sending it again, and ` +
       'do not report this as done.',
+  });
+}
+
+/**
+ * The command request hit the per-request deadline: like a cancellation in
+ * flight, it may or may not have reached Kia.
+ */
+function timedOutDuringSend(
+  plan: CommandPlan,
+  vinKey: string,
+  proofFields: readonly string[],
+  baseline: KiaVehicleStatus | null,
+  timeoutMs: number,
+): CallToolResult {
+  return minifiedResult({
+    action: plan.action,
+    command: plan.command,
+    vinKey,
+    timedOut: true,
+    commandSent: 'unknown',
+    commandAccepted: 'unknown',
+    stateConfirmed: false,
+    expected: plan.expect,
+    baselineObserved: observeProof(baseline, proofFields),
+    note:
+      `Kia did not answer within ${Math.round(timeoutMs / 1000)}s, so the command request was abandoned. It may ` +
+      `have reached Kia and may still take effect (${describeExpectation(plan.expect)}). Re-read the vehicle status ` +
+      'before sending it again, and do not report this as done.',
   });
 }
 

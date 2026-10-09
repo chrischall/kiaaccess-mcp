@@ -52,7 +52,7 @@ npm run build
 ```bash
 cp .env.example .env
 # Edit .env: KIA_USERNAME, KIA_PASSWORD (and optionally KIA_WRITE_MODE,
-#            KIA_DEVICE_ID, KIA_RMTOKEN — see .env.example)
+#            KIA_DEVICE_ID, KIA_RMTOKEN, KIA_REQUEST_TIMEOUT_MS — see .env.example)
 ```
 
 `.env` is gitignored. The server never logs credentials, and no tool ever returns your password.
