@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { withCallSignal } from '@chrischall/mcp-utils';
+import { McpToolError, withCallSignal } from '@chrischall/mcp-utils';
 import { KiaCredentialError } from '../src/auth.js';
 import {
   KiaClient,
@@ -125,6 +125,37 @@ describe('deferred config error', () => {
     const err = await client.listVehicles().catch((e: unknown) => e as Error);
     expect(err.message).toContain('KIA_PASSWORD');
     expect(err.message).not.toContain('KIA_USERNAME');
+  });
+
+  it('defers the exact both-missing message and hint, not the raw requireEnvVar error', async () => {
+    const client = new KiaClient({ deviceId: DEVICE_ID, sessionIO: memoryIO(), fetchImpl: stubFetch([]).fetchImpl });
+    expect(client.isConfigured()).toBe(false);
+    const err = await client.listVehicles().catch((e: unknown) => e as McpToolError);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.message).toBe('kiaaccess-mcp is not configured: KIA_USERNAME and KIA_PASSWORD are not set.');
+    expect(err.message).not.toContain('Missing required environment variable');
+    expect(err.hint).toContain('Copy .env.example to .env');
+  });
+
+  it('defers the exact one-missing message (singular) for each credential', async () => {
+    process.env.KIA_USERNAME = 'driver@example.test';
+    const noPassword = new KiaClient({ deviceId: DEVICE_ID, sessionIO: memoryIO(), fetchImpl: stubFetch([]).fetchImpl });
+    expect((await noPassword.listVehicles().catch((e: unknown) => e as Error)).message).toBe(
+      'kiaaccess-mcp is not configured: KIA_PASSWORD is not set.',
+    );
+
+    delete process.env.KIA_USERNAME;
+    process.env.KIA_PASSWORD = 'fake-password';
+    const noUsername = new KiaClient({ deviceId: DEVICE_ID, sessionIO: memoryIO(), fetchImpl: stubFetch([]).fetchImpl });
+    expect((await noUsername.listVehicles().catch((e: unknown) => e as Error)).message).toBe(
+      'kiaaccess-mcp is not configured: KIA_USERNAME is not set.',
+    );
+  });
+
+  it('treats an unsubstituted ${...} placeholder credential as missing', () => {
+    process.env.KIA_USERNAME = 'driver@example.test';
+    process.env.KIA_PASSWORD = '${user_config.kia_password}';
+    expect(new KiaClient({ deviceId: DEVICE_ID, sessionIO: memoryIO() }).isConfigured()).toBe(false);
   });
 
   it('reads credentials from the environment when none are injected', async () => {
