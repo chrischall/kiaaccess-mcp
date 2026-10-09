@@ -40,6 +40,25 @@
           "description": "Optional stable device UUID used for the app login handshake. Generated and cached under ~/.kiaaccess-mcp/ when omitted.",
           "isRequired": false,
           "format": "string"
+        },
+        {
+          "name": "KIA_RMTOKEN",
+          "description": "Optional. A remember-me token from a completed MFA bootstrap elsewhere (copy `rmtoken` out of that machine's ~/.kiaaccess-mcp/session.json). Set it and the one-time bootstrap is skipped entirely; set KIA_DEVICE_ID to the SAME value that was in effect during the bootstrap.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "KIA_REQUEST_TIMEOUT_MS",
+          "description": "Optional. Per-request deadline for Kia API calls, in milliseconds (default 30000).",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "KIA_SESSION_FILE",
+          "description": "Optional. Where the session store lives (default ~/.kiaaccess-mcp/session.json).",
+          "isRequired": false,
+          "format": "filepath"
         }
       ]
     }

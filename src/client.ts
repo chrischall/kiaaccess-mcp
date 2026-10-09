@@ -27,6 +27,7 @@ import {
   loadDotenvSafely,
   readEnvVar,
   reportProgress,
+  requireEnvVar,
   verifyAfterWrite,
 } from '@chrischall/mcp-utils';
 import {
@@ -348,6 +349,19 @@ interface KiaRequestOptions {
   bodyForVinKey?: (vinKey: string) => unknown;
 }
 
+/**
+ * Run a `requireEnvVar` read, returning `undefined` instead of throwing when
+ * the variable is unset (or a `${...}` placeholder) so the caller can defer
+ * one combined config error to request time.
+ */
+function unlessMissing(read: () => string): string | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
+}
+
 export class KiaClient {
   private readonly opts: KiaClientOptions;
   private readonly sessionIO: KiaSessionIO;
@@ -393,8 +407,12 @@ export class KiaClient {
   private resolveCredentials(): void {
     if (this.credentialsResolved) return;
     this.credentialsResolved = true;
-    const username = this.opts.username ?? readEnvVar('KIA_USERNAME');
-    const password = this.opts.password ?? readEnvVar('KIA_PASSWORD');
+    // Both are required (every Kia call needs them), so they are read with
+    // requireEnvVar — but its throw is caught here and recorded as the
+    // deferred McpToolError below, so the server still boots and
+    // kia_session_status / kia_healthcheck can explain what is missing.
+    const username = this.opts.username ?? unlessMissing(() => requireEnvVar('KIA_USERNAME'));
+    const password = this.opts.password ?? unlessMissing(() => requireEnvVar('KIA_PASSWORD'));
     const missing = [
       ...(username ? [] : ['KIA_USERNAME']),
       ...(password ? [] : ['KIA_PASSWORD']),

@@ -106,7 +106,11 @@
       "env": {
         "KIA_USERNAME": "${user_config.kia_username}",
         "KIA_PASSWORD": "${user_config.kia_password}",
-        "KIA_WRITE_MODE": "${user_config.kia_write_mode}"
+        "KIA_WRITE_MODE": "${user_config.kia_write_mode}",
+        "KIA_DEVICE_ID": "${user_config.kia_device_id}",
+        "KIA_RMTOKEN": "${user_config.kia_rmtoken}",
+        "KIA_REQUEST_TIMEOUT_MS": "${user_config.kia_request_timeout_ms}",
+        "KIA_SESSION_FILE": "${user_config.kia_session_file}"
       }
     }
   },
@@ -129,6 +133,31 @@
       "title": "Vehicle command mode",
       "description": "\"none\" disables all vehicle commands; \"comfort\" allows climate and charging; \"all\" also allows door lock/unlock.",
       "default": "comfort",
+      "required": false
+    },
+    "kia_device_id": {
+      "type": "string",
+      "title": "Device id",
+      "description": "Optional stable device UUID used for the app login handshake. Generated and cached under ~/.kiaaccess-mcp/ when omitted.",
+      "required": false
+    },
+    "kia_rmtoken": {
+      "type": "string",
+      "title": "Remember-me token",
+      "description": "Optional. A remember-me token from a completed MFA bootstrap elsewhere (copy `rmtoken` out of that machine's ~/.kiaaccess-mcp/session.json). Set it and the one-time bootstrap is skipped entirely. It is a CREDENTIAL, and it is bound to the device uuid it was minted against, so set the device id to the SAME value that was in effect during the bootstrap.",
+      "sensitive": true,
+      "required": false
+    },
+    "kia_request_timeout_ms": {
+      "type": "string",
+      "title": "Request timeout (ms)",
+      "description": "Optional. Per-request deadline for Kia API calls, in milliseconds (default 30000).",
+      "required": false
+    },
+    "kia_session_file": {
+      "type": "string",
+      "title": "Session file",
+      "description": "Optional. Where the session store lives (default ~/.kiaaccess-mcp/session.json).",
       "required": false
     }
   },
