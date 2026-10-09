@@ -64,16 +64,16 @@ A server with no one to read an OTP cannot run these steps at all. Bootstrap it 
 | `kia_vehicle_status(vehicle_key, include_raw?)` | Cached status: `doorLock`, `ign3`, the nested `climate` block, and (with `include_raw`) battery/EV detail, doors, tyres. |
 | `kia_refresh_status(vehicle_key)` | Wakes the telematics unit. Slow, draws power, returns no data — re-read `kia_vehicle_status` after. |
 | `kia_vehicle_location(vehicle_key)` | Last reported position + map link. Not a live fix. |
-| `kia_charge_targets(vinKey)` | Target state of charge per plug type. |
+| `kia_charge_targets(vehicle_key)` | Target state of charge per plug type. |
 
 ### Commands (all confirmation-gated, all take `confirmToken?`)
 | Tool | Mode | Notes |
 |------|------|-------|
-| `kia_start_climate(vinKey, temperature?, durationMinutes?, defrost?, waitSeconds?, confirmToken?)` | `comfort` | Verified live. Temperature is best-effort — do not promise the user an exact cabin temperature. |
-| `kia_stop_climate(vinKey, waitSeconds?, confirmToken?)` | `comfort` | Verified live. |
+| `kia_start_climate(vehicle_key, temperature?, durationMinutes?, defrost?, waitSeconds?, confirmToken?)` | `comfort` | Verified live. Temperature is best-effort — do not promise the user an exact cabin temperature. |
+| `kia_stop_climate(vehicle_key, waitSeconds?, confirmToken?)` | `comfort` | Verified live. |
 | `kia_start_charge` / `kia_stop_charge` / `kia_set_charge_limits` | `comfort` | Verified against a plugged-in car. A success status means Kia accepted the command, not that the car acted — confirm charge start/stop via `kia_vehicle_status` (`evStatus.batteryCharge`), and limits via `kia_charge_targets`. `kia_set_charge_limits` REPLACES the target list, so send both plug types. Starting a charge on an unplugged car succeeds and does nothing. |
-| `kia_lock_doors(vinKey, waitSeconds?, confirmToken?)` | `all` | Verified live by re-reading `doorLock`. |
-| `kia_unlock_doors(vinKey, waitSeconds?, confirmToken?)` | `all` | Leaves the car unsecured. Only when the user explicitly asked for this vehicle. |
+| `kia_lock_doors(vehicle_key, waitSeconds?, confirmToken?)` | `all` | Verified live by re-reading `doorLock`. |
+| `kia_unlock_doors(vehicle_key, waitSeconds?, confirmToken?)` | `all` | Leaves the car unsecured. Only when the user explicitly asked for this vehicle. |
 
 ## Confirmations
 
@@ -91,6 +91,6 @@ Every write — each command, plus `kia_start_login`, `kia_forget_session` and `
 ## Caution
 
 - **Confirm with the user before every command** — these move a real vehicle. Unlocking especially: it leaves the car open until someone locks it.
-- **Never guess a `vehicleKey`.** Call `kia_list_vehicles` first.
+- **Never guess a `vehicleKey`.** Call `kia_list_vehicles` first. Pass it as `vehicle_key` on every tool. The read tools default it to the only car on a one-vehicle account; the command and charging tools always require it, so every command names the car it acts on.
 - **Never retry a rejected login** (see above) and never echo the password, the `rmtoken`, or a session id into the conversation.
 - **A cached read can be stale.** If freshness matters, `kia_refresh_status`, wait, then re-read.

@@ -222,6 +222,17 @@ describe('manifest.json tools list', () => {
 });
 
 describe('vehicle key argument', () => {
+  const COMMAND_AND_CHARGING_TOOLS = new Set([
+    'kia_lock_doors',
+    'kia_unlock_doors',
+    'kia_start_climate',
+    'kia_stop_climate',
+    'kia_charge_targets',
+    'kia_start_charge',
+    'kia_stop_charge',
+    'kia_set_charge_limits',
+  ]);
+
   it('validates the vehicle key identically on every vehicle-scoped tool', async () => {
     process.env.KIA_WRITE_MODE = 'all';
     const harness = await createTestHarness(async (server) => {
@@ -232,10 +243,16 @@ describe('vehicle key argument', () => {
       const shapes = new Map<string, string>();
       for (const tool of tools) {
         const properties = (tool.inputSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
-        for (const name of ['vinKey', 'vehicle_key']) {
-          if (properties[name] === undefined) continue;
-          const { description: _description, ...shape } = properties[name];
-          shapes.set(`${tool.name}.${name}`, JSON.stringify(shape));
+        // One parameter name for the one identifier: no tool may still expose
+        // the old camelCase `vinKey`.
+        expect(properties.vinKey, `${tool.name} still takes vinKey`).toBeUndefined();
+        if (properties.vehicle_key === undefined) continue;
+        const { description: _description, ...shape } = properties.vehicle_key;
+        shapes.set(tool.name, JSON.stringify(shape));
+        // Commands and charging keep the key REQUIRED (no single-vehicle
+        // default): the preview stays offline and an unlock always names the car.
+        if (COMMAND_AND_CHARGING_TOOLS.has(tool.name)) {
+          expect(tool.inputSchema.required, `${tool.name} must require vehicle_key`).toContain('vehicle_key');
         }
       }
       expect(shapes.size).toBe(11);

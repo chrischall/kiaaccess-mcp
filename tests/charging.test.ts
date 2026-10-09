@@ -205,21 +205,21 @@ describe('kia_charge_targets', () => {
     const stub = makeClient([[{ plugType: 0, targetSOClevel: 90 }]]);
     harness = await harnessFor(stub);
 
-    const parsed = parseToolResult<{ vinKey: string; endpoint: string; targets: KiaChargeTarget[] }>(
-      await harness.callTool('kia_charge_targets', { vinKey: VIN_KEY }),
+    const parsed = parseToolResult<{ vehicleKey: string; endpoint: string; targets: KiaChargeTarget[] }>(
+      await harness.callTool('kia_charge_targets', { vehicle_key: VIN_KEY }),
     );
 
     expect(stub.getChargeTargets).toHaveBeenCalledExactlyOnceWith(VIN_KEY);
-    expect(parsed.vinKey).toBe(VIN_KEY);
+    expect(parsed.vehicleKey).toBe(VIN_KEY);
     expect(parsed.endpoint).toBe('evc/gts');
     expect(parsed.targets).toEqual([{ plugType: 0, targetSOClevel: 90 }]);
   });
 
-  it('rejects a vinKey carrying control characters (header injection)', async () => {
+  it('rejects a vehicle_key carrying control characters (header injection)', async () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const result = await harness.callTool('kia_charge_targets', { vinKey: 'FAKE\r\nsid: x' });
+    const result = await harness.callTool('kia_charge_targets', { vehicle_key: 'FAKE\r\nsid: x' });
 
     expect(result.isError).toBe(true);
     expect(networkCallCount(stub)).toBe(0);
@@ -231,7 +231,7 @@ describe('kia_start_charge', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const parsed = (await previewOf(harness, 'kia_start_charge', { vinKey: VIN_KEY })) as {
+    const parsed = (await previewOf(harness, 'kia_start_charge', { vehicle_key: VIN_KEY })) as {
       method: string;
       endpoint: string;
       willSend: unknown;
@@ -252,7 +252,7 @@ describe('kia_start_charge', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const parsed = (await previewOf(harness, 'kia_start_charge', { vinKey: VIN_KEY, chargeRatio: 80 })) as {
+    const parsed = (await previewOf(harness, 'kia_start_charge', { vehicle_key: VIN_KEY, chargeRatio: 80 })) as {
       willSend: { chargeRatio: number };
     };
 
@@ -269,7 +269,7 @@ describe('kia_start_charge', () => {
       endpointVerified: boolean;
       xid: string;
       verification: { attempted: boolean; reason: string };
-    }>(await callConfirmed(harness, 'kia_start_charge', { vinKey: VIN_KEY, chargeRatio: 80 }));
+    }>(await callConfirmed(harness, 'kia_start_charge', { vehicle_key: VIN_KEY, chargeRatio: 80 }));
 
     expect(stub.startCharge).toHaveBeenCalledExactlyOnceWith(VIN_KEY, 80);
     expect(parsed.command).toBe('charge');
@@ -283,7 +283,7 @@ describe('kia_start_charge', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    await callConfirmed(harness, 'kia_start_charge', { vinKey: VIN_KEY });
+    await callConfirmed(harness, 'kia_start_charge', { vehicle_key: VIN_KEY });
 
     expect(stub.startCharge).toHaveBeenCalledExactlyOnceWith(VIN_KEY, 100);
   });
@@ -292,7 +292,7 @@ describe('kia_start_charge', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const result = await harness.callTool('kia_start_charge', { vinKey: VIN_KEY, chargeRatio: 150 });
+    const result = await harness.callTool('kia_start_charge', { vehicle_key: VIN_KEY, chargeRatio: 150 });
 
     expect(result.isError).toBe(true);
     expect(networkCallCount(stub)).toBe(0);
@@ -304,7 +304,7 @@ describe('kia_stop_charge', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const parsed = (await previewOf(harness, 'kia_stop_charge', { vinKey: VIN_KEY })) as {
+    const parsed = (await previewOf(harness, 'kia_stop_charge', { vehicle_key: VIN_KEY })) as {
       method: string;
       endpoint: string;
       willSend?: unknown;
@@ -322,7 +322,7 @@ describe('kia_stop_charge', () => {
     harness = await harnessFor(stub);
 
     const parsed = parseToolResult<{ command: string; endpointVerified: boolean }>(
-      await callConfirmed(harness, 'kia_stop_charge', { vinKey: VIN_KEY }),
+      await callConfirmed(harness, 'kia_stop_charge', { vehicle_key: VIN_KEY }),
     );
 
     expect(stub.cancelCharge).toHaveBeenCalledExactlyOnceWith(VIN_KEY);
@@ -338,7 +338,7 @@ describe('kia_set_charge_limits', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const parsed = (await previewOf(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets })) as {
+    const parsed = (await previewOf(harness, 'kia_set_charge_limits', { vehicle_key: VIN_KEY, targets })) as {
       endpoint: string;
       willSend: unknown;
       verification: string;
@@ -358,7 +358,7 @@ describe('kia_set_charge_limits', () => {
     const parsed = parseToolResult<{
       command: string;
       verification: { attempted: boolean; verified: boolean; changedFields: string[]; targets: KiaChargeTarget[] };
-    }>(await callConfirmed(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets }));
+    }>(await callConfirmed(harness, 'kia_set_charge_limits', { vehicle_key: VIN_KEY, targets }));
 
     expect(stub.setChargeTargets).toHaveBeenCalledExactlyOnceWith(VIN_KEY, targets);
     expect(stub.getChargeTargets).toHaveBeenCalledTimes(2); // baseline + verification re-read
@@ -374,7 +374,7 @@ describe('kia_set_charge_limits', () => {
     harness = await harnessFor(stub);
 
     const parsed = parseToolResult<{ verification: { verified: boolean; hint: string } }>(
-      await callConfirmed(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets }),
+      await callConfirmed(harness, 'kia_set_charge_limits', { vehicle_key: VIN_KEY, targets }),
     );
 
     expect(parsed.verification.verified).toBe(false);
@@ -395,7 +395,7 @@ describe('kia_set_charge_limits', () => {
     harness = await harnessFor(stub);
 
     const parsed = parseToolResult<{ verification: { verified: boolean; targets: unknown } }>(
-      await callConfirmed(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets }),
+      await callConfirmed(harness, 'kia_set_charge_limits', { vehicle_key: VIN_KEY, targets }),
     );
 
     expect(parsed.verification.verified).toBe(false);
@@ -407,7 +407,7 @@ describe('kia_set_charge_limits', () => {
     harness = await harnessFor(stub);
 
     const parsed = parseToolResult<{ verification: { attempted: boolean; reason: string } }>(
-      await callConfirmed(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets, verify: false }),
+      await callConfirmed(harness, 'kia_set_charge_limits', { vehicle_key: VIN_KEY, targets, verify: false }),
     );
 
     expect(stub.getChargeTargets).not.toHaveBeenCalled();
@@ -420,9 +420,9 @@ describe('kia_set_charge_limits', () => {
   it('refuses a token minted for different targets as DRAFT_CHANGED, sending nothing', async () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
-    const { confirmToken } = await requestConfirmation(harness, 'kia_set_charge_limits', { vinKey: VIN_KEY, targets });
+    const { confirmToken } = await requestConfirmation(harness, 'kia_set_charge_limits', { vehicle_key: VIN_KEY, targets });
     const result = await harness.callTool('kia_set_charge_limits', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       targets: [{ plugType: 0, targetSOClevel: 60 }],
       confirmToken,
     });
@@ -435,7 +435,7 @@ describe('kia_set_charge_limits', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
     const result = await harness.callTool('kia_set_charge_limits', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       targets: [
         { plugType: 1, targetSOClevel: 80 },
         { plugType: 1, targetSOClevel: 90 },
@@ -452,7 +452,7 @@ describe('kia_set_charge_limits', () => {
     harness = await harnessFor(stub);
 
     const result = await harness.callTool('kia_set_charge_limits', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       targets: [
         { plugType: 1, targetSOClevel: 80 },
         { plugType: 1, targetSOClevel: 90 },
@@ -471,7 +471,7 @@ describe('kia_set_charge_limits', () => {
     harness = await harnessFor(stub);
 
     const result = await harness.callTool('kia_set_charge_limits', {
-      vinKey: VIN_KEY,
+      vehicle_key: VIN_KEY,
       targets: [{ plugType: 0, targetSOClevel: 5 }],
     });
 
@@ -483,7 +483,7 @@ describe('kia_set_charge_limits', () => {
     const stub = makeClient();
     harness = await harnessFor(stub);
 
-    const result = await harness.callTool('kia_set_charge_limits', { vinKey: VIN_KEY, targets: [] });
+    const result = await harness.callTool('kia_set_charge_limits', { vehicle_key: VIN_KEY, targets: [] });
 
     expect(result.isError).toBe(true);
     expect(networkCallCount(stub)).toBe(0);
