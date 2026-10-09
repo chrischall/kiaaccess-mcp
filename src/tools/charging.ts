@@ -34,23 +34,14 @@ import {
   type KiaCommandName,
 } from '../protocol.js';
 import { CONFIRM_DESCRIPTION, confirmVehicleCommand, getKiaWriteMode } from './commands.js';
+import { VehicleKey } from './vehicle-key.js';
 
 // ---------------------------------------------------------------------------
 // Schema atoms
 // ---------------------------------------------------------------------------
 
-/**
- * The vehicle key (`vehicleKey` from the vehicle list) that every vehicle-scoped
- * call sends as the `vinkey` HEADER. Constrained to printable ASCII (`!`–`~`,
- * i.e. no space, no control characters) so a caller-supplied value can never
- * smuggle a CRLF into the header block.
- */
-const schemaVinKey = z
-  .string()
-  .min(1)
-  .max(200)
-  .regex(/^[!-~]+$/, 'vinKey must be printable ASCII with no whitespace or control characters')
-  .describe('Vehicle key (the `vehicleKey` from the vehicle-list tool). Not the VIN.');
+/** The vehicle key (`vehicleKey` from the vehicle list), sent as the `vinkey` header. */
+const schemaVinKey = VehicleKey.describe('Vehicle key (the `vehicleKey` from the vehicle-list tool). Not the VIN.');
 
 /**
  * Lower bound on a target state of charge. Kia's own app offers 50–100% in 10%

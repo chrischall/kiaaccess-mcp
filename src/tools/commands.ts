@@ -24,7 +24,6 @@
 import type { McpServer, CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import {
   McpToolError,
-  SafePathSegment,
   confirmTokenParam,
   confirmationFromEnv,
   currentCallSignal,
@@ -50,6 +49,7 @@ import {
   type CommandSpec,
   type KiaCommandName,
 } from '../protocol.js';
+import { VehicleKey } from './vehicle-key.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so a real client
@@ -99,7 +99,7 @@ export function getKiaWriteMode(): KiaWriteMode {
 // Shared argument atoms
 // ---------------------------------------------------------------------------
 
-const vinKeyArg = SafePathSegment.describe(
+const vinKeyArg = VehicleKey.describe(
   'The vehicle key (`vehicleKey` from the vehicle-list tool), used as the `vinkey` header. Not the VIN.',
 );
 

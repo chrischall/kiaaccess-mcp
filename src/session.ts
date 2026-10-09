@@ -71,9 +71,9 @@ export function openSessionStore(): SessionStore<KiaStoredSession> {
 }
 
 /**
- * Storage seam for the persisted session. The stdio server uses
- * {@link diskSessionIO}; a hosted per-user runtime (no filesystem) passes
- * {@link nullSessionIO} and supplies the `rmtoken` directly.
+ * Storage seam for the persisted session. The server uses
+ * {@link diskSessionIO}; tests substitute an in-memory one. A deployment with
+ * no usable filesystem supplies the token as `KIA_RMTOKEN` instead.
  */
 export interface KiaSessionIO {
   load(accountId: string): KiaStoredSession | null;
@@ -125,13 +125,6 @@ export function createSessionIO(openStore: () => SessionStore<KiaStoredSession>)
 
 /** Disk-backed session persistence (0600 file, 0700 dir). Never throws. */
 export const diskSessionIO: KiaSessionIO = createSessionIO(openSessionStore);
-
-/** No-op persistence for runtimes without a filesystem. */
-export const nullSessionIO: KiaSessionIO = {
-  load: () => null,
-  save: () => {},
-  clear: () => {},
-};
 
 /**
  * Assumed `sid` lifetime. **Unverified** — Kia does not publish one and the
