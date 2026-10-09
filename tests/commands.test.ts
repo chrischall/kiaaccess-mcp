@@ -320,6 +320,24 @@ describe('confirmation gate', () => {
     await harness.close();
   });
 
+  it('binds arguments outside the request too: a changed waitSeconds is DRAFT_CHANGED', async () => {
+    const { client, spies } = makeClient();
+    const harness = await harnessFor(client);
+    const { confirmToken } = await requestConfirmation(harness, 'kia_lock_doors', {
+      vehicle_key: VIN_KEY,
+      waitSeconds: 0,
+    });
+    const changed = await harness.callTool('kia_lock_doors', {
+      vehicle_key: VIN_KEY,
+      waitSeconds: 30,
+      confirmToken,
+    });
+    expect(changed.isError).toBe(true);
+    expect(parseToolResult<{ error: string }>(changed).error).toBe('DRAFT_CHANGED');
+    expectNoCalls(spies);
+    await harness.close();
+  });
+
   it('sends after the user accepts an elicitation prompt, without a token', async () => {
     const { client, spies } = makeClient();
     const harness = await createTestHarness((server) => registerCommandsTools(server, client), {

@@ -274,6 +274,12 @@ export async function confirmVehicleCommand(
     /** Everything the user reviews. */
     preview: Record<string, unknown>;
     confirmToken: string | undefined;
+    /**
+     * The tool's validated arguments, bound into both confirmation rails so a
+     * token or acceptance for one set of arguments cannot authorise another.
+     * `confirmToken` is dropped by mcp-utils before hashing.
+     */
+    args: Record<string, unknown>;
   },
 ): ReturnType<typeof requireConfirmationWithFallback> {
   const { command, vehicleKey, body, preview } = options;
@@ -284,6 +290,10 @@ export async function confirmVehicleCommand(
       message: 'Review and confirm this vehicle command:',
       details: preview,
       tool: options.tool,
+      // Single-account server: one KIA_USERNAME per process, so there is no
+      // principal to choose between.
+      account: undefined,
+      args: options.args,
       confirmToken: options.confirmToken,
       subject: () => ({
         target: vehicleKey,
@@ -591,7 +601,8 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         defrost: z.boolean().default(false).describe('Run front defrost (default false).'),
       }),
     },
-    async ({ vehicle_key: vehicleKey, waitSeconds, confirmToken, temperature, durationMinutes, defrost }, ctx) => {
+    async (input, ctx) => {
+      const { vehicle_key: vehicleKey, waitSeconds, confirmToken, temperature, durationMinutes, defrost } = input;
       const options: StartClimateOptions = {
         // `airTempF` is typed `number`, but the builder stringifies it and Kia's
         // `airTemp.value` is a STRING whose domain includes the "LOW"/"HIGH"
@@ -616,6 +627,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         body: plan.body,
         preview: commandPreview(plan, vehicleKey),
         confirmToken,
+        args: input,
       });
       if (gate) return gate;
       return runCommand(client, plan, { vehicleKey, waitSeconds }, () =>
@@ -644,7 +656,8 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
       },
       inputSchema: baseArgs,
     },
-    async ({ vehicle_key: vehicleKey, waitSeconds, confirmToken }, ctx) => {
+    async (input, ctx) => {
+      const { vehicle_key: vehicleKey, waitSeconds, confirmToken } = input;
       const plan: CommandPlan = {
         command: 'stop',
         action: `Stop climate on vehicle ${vehicleKey}`,
@@ -658,6 +671,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         body: plan.body,
         preview: commandPreview(plan, vehicleKey),
         confirmToken,
+        args: input,
       });
       if (gate) return gate;
       return runCommand(client, plan, { vehicleKey, waitSeconds }, () => client.stopClimate(vehicleKey));
@@ -695,7 +709,8 @@ function registerDoorTool(
       },
       inputSchema: baseArgs,
     },
-    async ({ vehicle_key: vehicleKey, waitSeconds, confirmToken }, ctx) => {
+    async (input, ctx) => {
+      const { vehicle_key: vehicleKey, waitSeconds, confirmToken } = input;
       const plan = tool.plan(vehicleKey);
       const gate = await confirmVehicleCommand(ctx, {
         tool: tool.name,
@@ -705,6 +720,7 @@ function registerDoorTool(
         body: plan.body,
         preview: commandPreview(plan, vehicleKey),
         confirmToken,
+        args: input,
       });
       if (gate) return gate;
       return runCommand(client, plan, { vehicleKey, waitSeconds }, () => tool.invoke(vehicleKey));
