@@ -5,6 +5,13 @@ summary: >-
   Kia Connect vehicle status, lock/unlock, climate and charging. Server-side
   login with a remember-me token that skips MFA, so it hosts without a browser.
   Writes are confirmation-gated and KIA_WRITE_MODE narrows them further.
+examples:
+  - prompt: Is my Kia locked right now, and is the climate running?
+    note: Reads the cached status; ask for a refresh when freshness matters.
+  - prompt: Refresh my car's status and tell me where it was last parked.
+    note: Wakes the telematics unit, then reads the last reported location.
+  - prompt: What charge limits are set on my EV for AC and DC charging?
+    note: Read-only — reports the target state of charge per plug type.
 env:
   - name: KIA_RMTOKEN
     secret: true
