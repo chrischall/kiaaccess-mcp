@@ -4,7 +4,7 @@ slug: kiaaccess
 summary: >-
   Kia Connect vehicle status, lock/unlock, climate and charging. Server-side
   login with a remember-me token that skips MFA, so it hosts without a browser.
-  Writes are confirmation-gated and KIA_WRITE_MODE narrows them further.
+  Writes are confirmation-gated.
 examples:
   - prompt: Is my Kia locked right now, and is the climate running?
     note: Reads the cached status; ask for a refresh when freshness matters.
