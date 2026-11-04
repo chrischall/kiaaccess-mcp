@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.1.0](https://github.com/chrischall/kiaaccess-mcp/compare/v2.0.1...v2.1.0) (2026-11-04)
+
+
+### Features
+
+* context-group hints ([#160](https://github.com/chrischall/kiaaccess-mcp/issues/160)) ([3334c10](https://github.com/chrischall/kiaaccess-mcp/commit/3334c10bc072c0b9fce2d2d07088f2fac49e7605))
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils ([#159](https://github.com/chrischall/kiaaccess-mcp/issues/159)) ([7efd226](https://github.com/chrischall/kiaaccess-mcp/commit/7efd226bd988061f8d72caf30987b7f8bb2eb4c9))
+* **deps:** bump the production-dependencies group with 3 updates ([#152](https://github.com/chrischall/kiaaccess-mcp/issues/152)) ([7320801](https://github.com/chrischall/kiaaccess-mcp/commit/732080144864e47deb56612281334464e553888e))
+* **deps:** bump the production-dependencies group with 3 updates ([#157](https://github.com/chrischall/kiaaccess-mcp/issues/157)) ([1b90d69](https://github.com/chrischall/kiaaccess-mcp/commit/1b90d69303ae333527a51ff9fd4de14882753598))
+
+
+### Documentation
+
+* **mint:** add sample prompts for the public catalog ([#154](https://github.com/chrischall/kiaaccess-mcp/issues/154)) ([4e35f38](https://github.com/chrischall/kiaaccess-mcp/commit/4e35f38eff488a6c315148af9e9ade02dd5c925c))
+* **mint:** fit the catalog summary within 200 characters ([#155](https://github.com/chrischall/kiaaccess-mcp/issues/155)) ([b4f9016](https://github.com/chrischall/kiaaccess-mcp/commit/b4f90169032484e43e39f88ecc675b6165cda418))
+
 ## [2.0.1](https://github.com/chrischall/kiaaccess-mcp/compare/v2.0.0...v2.0.1) (2026-10-14)
 
 
