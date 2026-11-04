@@ -93,3 +93,11 @@ Every write — each command, plus `kia_start_login` and `kia_forget_session` �
 - **Never guess a `vehicleKey`.** Call `kia_list_vehicles` first. Pass it as `vehicle_key` on every tool. The read tools default it to the only car on a one-vehicle account; the command and charging tools always require it, so every command names the car it acts on.
 - **Never retry a rejected login** (see above) and never echo the password, the `rmtoken`, or a session id into the conversation.
 - **A cached read can be stale.** If freshness matters, `kia_refresh_status`, wait, then re-read.
+
+## In context groups
+
+On mcp-host, every tool here except `kia_healthcheck` carries a `_meta.mint` hint placing it in the **`home`** group: the reads (`kia_list_vehicles`, `kia_vehicle_status`, `kia_vehicle_location`, `kia_charge_targets`, `kia_session_status`) as `lookup`, climate / charging / door commands as `turn-on-off`, `kia_set_charge_limits` as `change`, and the sign-in and refresh plumbing as `other`. Aliases carry the words people say ("warm up the car", "where is my car", "lock the car").
+
+- **No canonical read.** A car answers no "what's new / what's due / what's on" question, so a compound ask such as "what's new at home…and anything due at school?" draws nothing from this server; it is reached by its own words ("is the car charged, and where did I park?").
+- **No subject.** Vehicles are not published as a label enum: listing them needs a live Kia session, and this server will not attempt a sign-in at start (failed sign-ins push the account into permanent reCAPTCHA). Name the car with `vehicle_key` from `kia_list_vehicles` as usual.
+- Commands stay confirmation-gated whatever the group asks. With no signed-in session the group gets the same "run the MFA bootstrap" error as any other call.
