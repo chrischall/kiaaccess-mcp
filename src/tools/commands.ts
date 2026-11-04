@@ -50,6 +50,7 @@ import {
   type KiaCommandName,
 } from '../protocol.js';
 import { VehicleKey } from './vehicle-key.js';
+import { CLIMATE_META, DOOR_META } from './hints.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so a real client
@@ -579,6 +580,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         'user a specific cabin temperature. Seat and steering-wheel/rear-window heating are not sent at all: the ' +
         'request body deliberately omits `heatVentSeat` (Kia validates seat capability per car) and leaves every ' +
         '`heatingAccessory` field at 0.',
+      _meta: CLIMATE_META,
       annotations: {
         ...toolAnnotations({
           title: 'Start climate',
@@ -645,6 +647,7 @@ export function registerCommandsTools(server: McpServer, client: KiaCommandsClie
         'NESTED `climate.airCtrl` reads false (there is no flat `airCtrlOn` field); `ign3` — the EV ignition proxy ' +
         '— is reported alongside. `commandAccepted` (Kia took the request) and `stateConfirmed` (the car actually ' +
         'reads stopped) are separate. State changes were observed to take 30–60s.',
+      _meta: CLIMATE_META,
       annotations: {
         ...toolAnnotations({
           title: 'Stop climate',
@@ -698,6 +701,7 @@ function registerDoorTool(
     tool.name,
     {
       description: tool.description,
+      _meta: DOOR_META,
       annotations: {
         ...toolAnnotations({
           title: tool.title,

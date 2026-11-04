@@ -45,6 +45,7 @@ import { z } from 'zod';
 import type { KiaClient } from '../client.js';
 import { BASE_URL, ENDPOINTS } from '../protocol.js';
 import { CONFIRM_DESCRIPTION, type KiaWriteMode, getKiaWriteMode } from './commands.js';
+import { SESSION_META, SESSION_STATUS_META } from './hints.js';
 
 /**
  * The slice of {@link KiaClient} these tools use. Structural, so the real
@@ -165,6 +166,7 @@ function registerSessionStatusTool(server: McpServer, client: KiaSessionClient):
         'Makes NO network call and returns no secret — the account email is masked, the device id is truncated, ' +
         'and neither the session id nor the remember-me token is ever included. Start here when a Kia tool ' +
         'reports it is not configured.',
+      _meta: SESSION_STATUS_META,
       annotations: toolAnnotations({
         title: 'Kia session status',
         readOnly: true,
@@ -207,6 +209,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'failed logins and eventually enforces reCAPTCHA, which breaks server-side login for this account ' +
         'PERMANENTLY — so a rejection is never retried, and a wrong password must be fixed in the environment ' +
         'rather than guessed at.',
+      _meta: SESSION_META,
       annotations: toolAnnotations({
         title: 'Start Kia login (MFA bootstrap)',
         readOnly: false,
@@ -278,6 +281,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'email. Takes the `otpKey` and `xid` from kia_start_login — it cannot run without them, which is why it ' +
         'has no separate confirmation gate. Ask the user which channel they want (kia_start_login reports the masked ' +
         'destinations Kia has on file). The passcode expires in about two minutes; `expiresAt` reports when.',
+      _meta: SESSION_META,
       annotations: toolAnnotations({
         title: 'Send Kia login passcode',
         readOnly: false,
@@ -320,6 +324,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'remember-me token is stored locally and is NOT returned — from here on every Kia tool refreshes its own ' +
         'session silently and MFA is never needed again on this device. Takes the `otpKey` and `xid` from ' +
         'kia_start_login plus the code the user received.',
+      _meta: SESSION_META,
       annotations: toolAnnotations({
         title: 'Verify Kia login passcode',
         readOnly: false,
@@ -366,6 +371,7 @@ export function registerSessionTools(server: McpServer, client: KiaSessionClient
         'session file by hand. It makes NO network call: Kia is not told anything, only this machine forgets. ' +
         CONFIRM_DESCRIPTION +
         ' Nothing is deleted until it is confirmed.',
+      _meta: SESSION_META,
       annotations: toolAnnotations({
         title: 'Forget stored Kia session',
         readOnly: false,

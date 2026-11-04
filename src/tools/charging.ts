@@ -35,6 +35,7 @@ import {
 } from '../protocol.js';
 import { CONFIRM_DESCRIPTION, confirmVehicleCommand, getKiaWriteMode } from './commands.js';
 import { VehicleKey } from './vehicle-key.js';
+import { CHARGE_LIMITS_META, CHARGE_META, CHARGE_TARGETS_META } from './hints.js';
 
 // ---------------------------------------------------------------------------
 // Schema atoms
@@ -181,6 +182,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
       description:
         `Read the EV charge targets (\`${ENDPOINTS.chargeTargets}\`): the target state of charge per plug type ` +
         '(one entry for AC, one for DC). Verified live against a real vehicle. Read-only — makes no changes.',
+      _meta: CHARGE_TARGETS_META,
       annotations: toolAnnotations({
         title: 'Kia EV charge targets',
         openWorld: true,
@@ -209,6 +211,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         'to be plugged in — on an unplugged car Kia still accepts the request and nothing happens. Confirm with ' +
         'kia_vehicle_status rather than trusting the success status. ' +
         CONFIRM_DESCRIPTION,
+      _meta: CHARGE_META,
       annotations: toolAnnotations({
         title: 'Start Kia EV charging',
         readOnly: false,
@@ -261,6 +264,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         'Verified against a charging vehicle: evStatus.batteryCharge goes false within ~30-60s. Confirm with ' +
         'kia_vehicle_status rather than trusting the success status. ' +
         CONFIRM_DESCRIPTION,
+      _meta: CHARGE_META,
       annotations: toolAnnotations({
         title: 'Stop Kia EV charging',
         readOnly: false,
@@ -302,6 +306,7 @@ export function registerChargingTools(server: McpServer, client: KiaClient): voi
         'replaces the stored one, so omitting an entry drops that target. ' +
         CONFIRM_DESCRIPTION +
         ' The preview step makes no call at all, not even the baseline read.',
+      _meta: CHARGE_LIMITS_META,
       annotations: toolAnnotations({
         title: 'Set Kia EV charge limits',
         readOnly: false,

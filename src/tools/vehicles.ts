@@ -30,6 +30,7 @@ import { z } from 'zod';
 import { extractVehicleStatus } from '../client.js';
 import type { KiaClient, KiaSeatHeatVent, KiaVehicleInfo, KiaVehicleSummary } from '../client.js';
 import { VehicleKey } from './vehicle-key.js';
+import { LIST_VEHICLES_META, REFRESH_STATUS_META, VEHICLE_LOCATION_META, VEHICLE_STATUS_META } from './hints.js';
 
 /** How many trailing VIN characters stay visible. */
 const VIN_VISIBLE_SUFFIX = 6;
@@ -168,6 +169,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'List the vehicles enrolled on this Kia Owners account (ownr/gvl). Returns each vehicleKey — the id every ' +
         'other Kia tool takes — plus nickname, model year/name/trim, mileage, fuel type and telematics unit. ' +
         'VINs are masked to their last 6 characters.',
+      _meta: LIST_VEHICLES_META,
       annotations: toolAnnotations({
         title: 'List Kia vehicles',
         readOnly: true,
@@ -198,6 +200,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'ventilating or off based on them. An absent seat block means this read carried no seat data — it does NOT ' +
         'mean the car lacks heated seats, which this server cannot currently determine. ' +
         'Pass include_raw for the untrimmed status block (battery/EV detail, doors, tyres, …).',
+      _meta: VEHICLE_STATUS_META,
       annotations: toolAnnotations({
         title: 'Kia vehicle status',
         readOnly: true,
@@ -270,6 +273,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'slower than kia_vehicle_status and draws a little power — prefer the cached read unless staleness matters. ' +
         'Kia only acknowledges the request; it does not return the new data and gives no completion signal, so read ' +
         'kia_vehicle_status afterwards to see the refreshed values.',
+      _meta: REFRESH_STATUS_META,
       annotations: toolAnnotations({
         title: 'Refresh Kia vehicle status',
         // Not read-only: hosts auto-approve readOnlyHint tools, and every call
@@ -305,6 +309,7 @@ export function registerVehiclesTools(server: McpServer, client: KiaClient): voi
         'telematics unit last reported being, not a live GPS fix — run kia_refresh_status first for a recent one. ' +
         'Latitude/longitude and a map link are derived when the block carries `coord.lat`/`coord.lon`; otherwise the ' +
         'raw block is returned as-is (its exact field names are not verified).',
+      _meta: VEHICLE_LOCATION_META,
       annotations: toolAnnotations({
         title: 'Kia vehicle location',
         readOnly: true,
