@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/chrischall/kiaaccess-mcp/compare/v2.1.0...v2.1.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils ([#162](https://github.com/chrischall/kiaaccess-mcp/issues/162)) ([26bff64](https://github.com/chrischall/kiaaccess-mcp/commit/26bff640ffc579ec2ecd6acc3e37a2a16917c60c))
+* **deps:** bump the production-dependencies group with 2 updates ([#164](https://github.com/chrischall/kiaaccess-mcp/issues/164)) ([c5f8866](https://github.com/chrischall/kiaaccess-mcp/commit/c5f8866a827c0088efc9b55be1745d594e4afc83))
+
 ## [2.1.0](https://github.com/chrischall/kiaaccess-mcp/compare/v2.0.1...v2.1.0) (2026-11-04)
 
 
